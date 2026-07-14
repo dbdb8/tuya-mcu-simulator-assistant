@@ -140,7 +140,7 @@ jobs:
         run: node scripts/generate-latest-json.mjs release-assets
 
       - name: Upload installers and updater metadata
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           body_path: release-notes.txt
           files: |

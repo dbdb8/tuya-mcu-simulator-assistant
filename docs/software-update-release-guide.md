@@ -50,3 +50,17 @@ https://github.com/dbdb8/tuya-mcu-simulator-assistant/releases/latest/download/l
 ## 系统代码签名预留
 
 当前 updater 签名可以防止更新包被篡改，但不会消除 Windows SmartScreen 或 macOS Gatekeeper 提示。后续可以在现有工作流中增加 Windows 代码签名证书、Apple Developer ID 和 notarization Secrets，不需要更改应用内更新交互。
+
+### 当前 macOS 未签名构建的安装说明
+
+在接入 Apple Developer ID 和公证前，用户需要先把应用移动到 `/Applications`，再执行：
+
+```bash
+xattr -dr com.apple.quarantine "/Applications/Tuya MCU Simulator Assistant.app"
+codesign --force --deep --sign - "/Applications/Tuya MCU Simulator Assistant.app"
+```
+
+- `xattr` 用于递归移除 GitHub 下载文件携带的 `com.apple.quarantine` 隔离属性。
+- `codesign --sign -` 生成仅在当前机器使用的 ad-hoc 临时签名，不代表 Apple 或项目维护者身份认证。
+- 这些命令只应对从本项目官方 GitHub Release 下载并已确认来源的应用执行。
+- 正式接入 Developer ID 签名和 notarization 后，应删除面向用户的该操作要求。

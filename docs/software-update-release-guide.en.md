@@ -36,3 +36,17 @@ https://github.com/dbdb8/tuya-mcu-simulator-assistant/releases/latest/download/l
 ```
 
 Windows, macOS, and Linux AppImage installations can update in-app. Debian package installations open the GitHub Release page for manual installation. Updater signing protects artifact integrity but does not replace Windows Authenticode signing or Apple notarization.
+
+## Current Unsigned macOS Build
+
+Until Apple Developer ID signing and notarization are configured, users should move the application to `/Applications` and run:
+
+```bash
+xattr -dr com.apple.quarantine "/Applications/Tuya MCU Simulator Assistant.app"
+codesign --force --deep --sign - "/Applications/Tuya MCU Simulator Assistant.app"
+```
+
+- `xattr` recursively removes the `com.apple.quarantine` attribute added to downloaded files.
+- `codesign --sign -` applies a local ad-hoc signature. It does not authenticate Apple or the project maintainer as the publisher.
+- These commands should only be used for a trusted application downloaded from the official project Release.
+- Remove this user-facing workaround after Developer ID signing and notarization are enabled.

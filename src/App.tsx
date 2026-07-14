@@ -16,6 +16,8 @@ import { useAppUpdater } from "./features/updater/useAppUpdater";
 import { useTranslation } from "react-i18next";
 import i18n, { changeAppLanguage, type AppLocale } from "./i18n";
 import { LanguageSettingsModal } from "./features/settings/LanguageSettingsModal";
+import { CloseBehaviorModal, type CloseBehavior } from "./features/settings/CloseBehaviorModal";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { DEFAULT_BAUD_RATE, DEFAULT_DP_PATH, STORAGE_KEYS } from "./constants";
 import type { AppError, BootstrapState, DpPoint, DpSchema, NetworkStatus, SerialLog } from "./types";
 import { groupPoints, normalizeInput } from "./features/dp/dp-utils";
@@ -29,6 +31,7 @@ import {
 
 export default function App() {
   const { t } = useTranslation();
+  const isWindows = navigator.userAgent.includes("Windows");
   const [dpPath, setDpPath] = useState(() => readStoredString(STORAGE_KEYS.dpFilePath, DEFAULT_DP_PATH));
   const [schema, setSchema] = useState<DpSchema | null>(null);
   const [values, setValues] = useState<Record<string, unknown>>({});
@@ -51,6 +54,12 @@ export default function App() {
   const [relatedModalOpen, setRelatedModalOpen] = useState(false);
   const [timerModalOpen, setTimerModalOpen] = useState(false);
   const [languageModalOpen, setLanguageModalOpen] = useState(false);
+  const [closeBehaviorModalOpen, setCloseBehaviorModalOpen] = useState(false);
+  const [closePromptOpen, setClosePromptOpen] = useState(false);
+  const [closeBehavior, setCloseBehavior] = useState<CloseBehavior>(() => {
+    const stored = readStoredString(STORAGE_KEYS.closeBehavior, "ask");
+    return stored === "tray" || stored === "exit" ? stored : "ask";
+  });
   const [language, setLanguage] = useState<AppLocale>(() => (i18n.language === "en-US" ? "en-US" : "zh-CN"));
   const restoredOnce = useRef(false);
   const timer = useTimerTasks({ schema, serialOpen, network, showError, setStatus });
@@ -84,6 +93,33 @@ export default function App() {
   useEffect(() => {
     void invoke("set_app_language", { language });
   }, [language]);
+
+  useEffect(() => {
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+    void getCurrentWindow()
+      .onCloseRequested(async (event) => {
+        // 仅 Windows 使用托盘关闭策略；其他平台继续遵循系统原生关闭习惯。
+        if (isWindows) {
+          event.preventDefault();
+          if (closeBehavior === "ask") {
+            setClosePromptOpen(true);
+          } else if (closeBehavior === "tray") {
+            await invoke("hide_main_window");
+          } else {
+            await invoke("exit_application");
+          }
+        }
+      })
+      .then((cleanup) => {
+        if (disposed) cleanup();
+        else unlisten = cleanup;
+      });
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, [closeBehavior, isWindows]);
 
   useEffect(() => {
     if (!restoredOnce.current) {
@@ -282,6 +318,13 @@ export default function App() {
       setLanguageModalOpen(true);
     },
     {
+      visible: isWindows,
+      onOpen: () => {
+        setSettingsOpen(false);
+        setCloseBehaviorModalOpen(true);
+      },
+    },
+    {
       onOpen: () => {
         setSettingsOpen(false);
         updater.openModal();
@@ -376,6 +419,29 @@ export default function App() {
         onChange={(nextLanguage) => {
           setLanguage(nextLanguage);
           void changeAppLanguage(nextLanguage);
+        }}
+      />
+      <CloseBehaviorModal
+        open={closeBehaviorModalOpen}
+        behavior={closeBehavior}
+        onClose={() => setCloseBehaviorModalOpen(false)}
+        onChange={(nextBehavior) => {
+          setCloseBehavior(nextBehavior);
+          localStorage.setItem(STORAGE_KEYS.closeBehavior, nextBehavior);
+          setCloseBehaviorModalOpen(false);
+        }}
+      />
+      <CloseBehaviorModal
+        open={closePromptOpen}
+        behavior={closeBehavior}
+        firstClose
+        onClose={() => setClosePromptOpen(false)}
+        onChange={(nextBehavior) => {
+          // 首次选择立即记忆；后续可在“设置 > 关闭行为”中恢复为每次询问。
+          setCloseBehavior(nextBehavior);
+          localStorage.setItem(STORAGE_KEYS.closeBehavior, nextBehavior);
+          setClosePromptOpen(false);
+          void invoke(nextBehavior === "tray" ? "hide_main_window" : "exit_application");
         }}
       />
       <div className="workspace no-simulator">

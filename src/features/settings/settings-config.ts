@@ -17,6 +17,7 @@ export function createSettingsItems(
   onRelatedCommands: () => void,
   onTimedReports: () => void,
   onLanguage: () => void,
+  closeBehavior: { visible: boolean; onOpen: () => void },
   updater: { onOpen: () => void; hasUpdate: boolean; version?: string; checking: boolean; failed: boolean },
 ): SettingsItem[] {
   // 设置入口采用数据配置，后续增加日志设置等功能时无需修改 Header 结构。
@@ -39,6 +40,16 @@ export function createSettingsItems(
       description: i18n.t("settings.languageDesc"),
       onClick: onLanguage,
     },
+    ...(closeBehavior.visible
+      ? [
+          {
+            key: "closeBehavior",
+            label: i18n.t("settings.closeBehavior"),
+            description: i18n.t("settings.closeBehaviorDesc"),
+            onClick: closeBehavior.onOpen,
+          },
+        ]
+      : []),
     {
       key: "softwareUpdate",
       label: i18n.t("settings.update"),

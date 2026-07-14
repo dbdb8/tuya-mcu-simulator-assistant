@@ -7,4 +7,5 @@ export const STORAGE_KEYS = {
   dpFilePath: "tuya-mcu-simulator-assistant.dpFilePath",
   timerTasks: "tuya-mcu-simulator-assistant.timerTasks",
   language: "tuya-mcu-simulator-assistant.language",
+  closeBehavior: "tuya-mcu-simulator-assistant.closeBehavior",
 } as const;

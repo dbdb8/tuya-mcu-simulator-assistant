@@ -926,6 +926,39 @@ label span {
   min-height: 42px;
 }
 
+.close-behavior-modal {
+  width: min(520px, calc(100vw - 32px));
+}
+
+.close-behavior-options {
+  display: grid;
+  gap: 10px;
+  padding: 18px 20px 20px;
+}
+
+.close-behavior-options button {
+  display: grid;
+  gap: 5px;
+  min-height: 68px;
+  padding: 12px 14px;
+  border: 1px solid #2b3d50;
+  text-align: left;
+}
+
+.close-behavior-options button span {
+  color: #91a2b6;
+  line-height: 1.45;
+}
+
+.close-behavior-options button.active {
+  border-color: #38bdf8;
+  background: #122737;
+}
+
+.close-behavior-options button.danger b {
+  color: #fca5a5;
+}
+
 .spin {
   animation: update-spin 1s linear infinite;
 }

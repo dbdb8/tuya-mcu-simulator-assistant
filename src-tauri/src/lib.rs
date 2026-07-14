@@ -13,7 +13,11 @@ use serial_runtime::{AppError, NetworkStatus, SerialOutbound, SerialRuntime, Ser
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use tauri::{Emitter, Manager};
+use tauri::{
+    menu::{Menu, MenuItem},
+    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
+    Emitter, Manager,
+};
 use tuya_protocol::{
     CMD_GET_GREEN_TIME, CMD_GET_LOCAL_TIME, CMD_GET_MAC, CMD_GET_WIFI_STATUS, CMD_HEARTBEAT_STOP,
     CMD_NEW_FUNCTION_NOTICE, CMD_QUERY_MEMORY, CMD_QUERY_SIGNAL_STRENGTH,
@@ -164,10 +168,37 @@ fn start_serial(
 
 #[tauri::command]
 fn stop_serial(state: tauri::State<Arc<AppState>>) {
+    stop_serial_runtime(state.inner());
+}
+
+fn stop_serial_runtime(state: &Arc<AppState>) {
     if let Some(mut runtime) = state.serial.lock().take() {
         runtime.stop();
     }
     *state.manual_tx.lock() = None;
+}
+
+#[tauri::command]
+fn hide_main_window(app: tauri::AppHandle) -> Result<(), String> {
+    let window = app
+        .get_webview_window("main")
+        .ok_or_else(|| "main window is unavailable".to_string())?;
+    window.hide().map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+fn exit_application(app: tauri::AppHandle, state: tauri::State<Arc<AppState>>) {
+    // 托盘退出和首次关闭弹窗共用清理入口，必须先停止串口线程，确保 COM 口立即释放。
+    stop_serial_runtime(state.inner());
+    app.exit(0);
+}
+
+fn show_main_window(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
 }
 
 #[tauri::command]
@@ -450,6 +481,37 @@ pub fn run() {
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.set_icon(tauri::include_image!("icons/128x128.png"));
             }
+            #[cfg(target_os = "windows")]
+            {
+                let show = MenuItem::with_id(app, "show", "显示主窗口 / Show", true, None::<&str>)?;
+                let exit = MenuItem::with_id(app, "exit", "退出 / Exit", true, None::<&str>)?;
+                let menu = Menu::with_items(app, &[&show, &exit])?;
+                TrayIconBuilder::new()
+                    .icon(tauri::include_image!("icons/128x128.png"))
+                    .tooltip("Tuya MCU Simulator Assistant")
+                    .menu(&menu)
+                    .on_menu_event(|app, event| match event.id.as_ref() {
+                        "show" => show_main_window(app),
+                        "exit" => {
+                            // 托盘菜单不经过前端关闭事件，因此在 Rust 中直接执行相同的串口清理。
+                            let state = app.state::<Arc<AppState>>();
+                            stop_serial_runtime(state.inner());
+                            app.exit(0);
+                        }
+                        _ => {}
+                    })
+                    .on_tray_icon_event(|tray, event| {
+                        if let TrayIconEvent::Click {
+                            button: MouseButton::Left,
+                            button_state: MouseButtonState::Up,
+                            ..
+                        } = event
+                        {
+                            show_main_window(tray.app_handle());
+                        }
+                    })
+                    .build(app)?;
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -473,7 +535,9 @@ pub fn run() {
             save_log_file,
             load_text_file,
             get_update_environment,
-            set_app_language
+            set_app_language,
+            hide_main_window,
+            exit_application
         ])
         .run(tauri::generate_context!())
         .expect("failed to start Tuya MCU simulator");

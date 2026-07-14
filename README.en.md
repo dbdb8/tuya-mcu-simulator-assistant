@@ -37,6 +37,17 @@ The settings menu provides related protocol commands, scheduled reports, languag
 
 ![English settings menu](docs/images/en-US/settings-menu.png)
 
+## macOS Gatekeeper
+
+The current macOS package is not yet signed and notarized with an Apple Developer ID. Some macOS versions may report that the application is damaged, cannot verify the developer, or prevent it from opening. Verify that the application came from this project's GitHub Release, move it to `/Applications`, and run the following commands in Terminal:
+
+```bash
+xattr -dr com.apple.quarantine "/Applications/Tuya MCU Simulator Assistant.app"
+codesign --force --deep --sign - "/Applications/Tuya MCU Simulator Assistant.app"
+```
+
+The first command removes the macOS download quarantine attribute. The second applies a local ad-hoc signature. Reopen the application after both commands complete. Only use these commands for a trusted application downloaded from this project's official Release.
+
 ## Development
 
 Node.js 20+, Rust stable, and the platform-specific Tauri build dependencies are required.

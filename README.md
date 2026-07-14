@@ -64,6 +64,17 @@ cargo test --manifest-path src-tauri/Cargo.toml
 3. 选择串口和波特率，默认波特率为 `9600`。
 4. 点击“开始调试”，观察初始化、配网和 DP 交互日志。
 
+### macOS 无法打开应用
+
+当前 macOS 安装包尚未使用 Apple Developer ID 签名和公证，部分系统会提示应用已损坏、无法验证开发者或直接阻止打开。请确认应用来自本项目的 GitHub Release，将应用移动到 `/Applications` 后，在“终端”中执行：
+
+```bash
+xattr -dr com.apple.quarantine "/Applications/Tuya MCU Simulator Assistant.app"
+codesign --force --deep --sign - "/Applications/Tuya MCU Simulator Assistant.app"
+```
+
+第一条命令移除 macOS 下载隔离属性，第二条命令为应用生成本机临时签名。完成后重新打开应用。仅对从本项目官方 Release 下载并确认可信的应用执行这些命令。
+
 详细实现见[开发指南](docs/tuya-mcu-simulator-development-guide.md)，发布与自动更新见[发布指南](docs/software-update-release-guide.md)。
 
 ## 贡献与安全

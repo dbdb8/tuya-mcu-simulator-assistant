@@ -1,5 +1,4 @@
 import type { DpPoint } from "../../types";
-import i18n from "../../i18n";
 
 export function enumDisplayValue(value: unknown, range: string[]) {
   if (typeof value === "number" && range[value]) return range[value];
@@ -21,12 +20,10 @@ export function groupPoints(points: DpPoint[], filter: string): Array<[string, D
 }
 
 export function groupName(id: number) {
-  if (id === 1 || id < 110) return i18n.t("dp.groups.basic");
-  if (id < 122) return i18n.t("dp.groups.lumbar");
-  if (id < 130) return i18n.t("dp.groups.massage");
-  if (id < 138) return i18n.t("dp.groups.sensor");
-  if (id < 145) return i18n.t("dp.groups.reminder");
-  return i18n.t("dp.groups.offline");
+  // Debugfile 的 DP ID 不携带统一业务语义，按固定数字区间分组，避免把某类产品结构套到其他设备上。
+  const normalizedId = Math.max(1, Math.trunc(id));
+  const start = Math.floor((normalizedId - 1) / 50) * 50 + 1;
+  return `DP ${start}-${start + 49}`;
 }
 
 export function normalizeInput(point: DpPoint, value: unknown) {

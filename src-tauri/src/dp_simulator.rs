@@ -249,13 +249,13 @@ mod tests {
                     name: "work status".into(),
                     mode: "ro".into(),
                     kind: DpKind::Enum,
-                    default_value: Some(json!("standby")),
-                    property: json!({"type":"enum","range":["standby","power_on","stretching","moving"]}),
+                    default_value: Some(json!("idle")),
+                    property: json!({"type":"enum","range":["idle","active","paused","error"]}),
                 },
                 DpPoint {
                     id: 122,
-                    code: "stretch_massage_switch".into(),
-                    name: "stretch switch".into(),
+                    code: "secondary_switch".into(),
+                    name: "secondary switch".into(),
                     mode: "rw".into(),
                     kind: DpKind::Bool,
                     default_value: Some(json!(false)),
@@ -263,8 +263,8 @@ mod tests {
                 },
                 DpPoint {
                     id: 123,
-                    code: "stretch_massage_state".into(),
-                    name: "stretch state".into(),
+                    code: "secondary_state".into(),
+                    name: "secondary state".into(),
                     mode: "ro".into(),
                     kind: DpKind::Enum,
                     default_value: Some(json!("idle")),
@@ -272,8 +272,8 @@ mod tests {
                 },
                 DpPoint {
                     id: 127,
-                    code: "stretch_remain_time".into(),
-                    name: "remain".into(),
+                    code: "remaining_time".into(),
+                    name: "remaining time".into(),
                     mode: "ro".into(),
                     kind: DpKind::Value,
                     default_value: Some(json!(0)),
@@ -305,8 +305,8 @@ mod tests {
         let report = DpReport {
             id: 101,
             kind: DpKind::Enum,
-            value: json!("power_on"),
-            enum_range: vec!["standby".into(), "power_on".into()],
+            value: json!("active"),
+            enum_range: vec!["idle".into(), "active".into()],
         };
         assert_eq!(encode_report_with_enum(&report), vec![101, 4, 0, 1, 1]);
     }
@@ -321,7 +321,7 @@ mod tests {
         assert!(reports
             .iter()
             .any(|report| report.id == 127 && report.value == json!(1)));
-        assert_eq!(values.get("stretch_remain_time"), Some(&json!(1)));
+        assert_eq!(values.get("remaining_time"), Some(&json!(1)));
     }
 
     #[test]
@@ -335,7 +335,7 @@ mod tests {
                     value: json!(true),
                 },
                 DpPatch {
-                    code: "stretch_remain_time".into(),
+                    code: "remaining_time".into(),
                     value: json!(42),
                 },
             ],
@@ -345,6 +345,6 @@ mod tests {
 
         assert_eq!(reports.len(), 2);
         assert_eq!(values.get("switch"), Some(&json!(true)));
-        assert_eq!(values.get("stretch_remain_time"), Some(&json!(42)));
+        assert_eq!(values.get("remaining_time"), Some(&json!(42)));
     }
 }

@@ -11,7 +11,7 @@ use parking_lot::Mutex;
 use serde::Serialize;
 use serial_runtime::{AppError, NetworkStatus, SerialOutbound, SerialRuntime, SerialSettings};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tauri::{Emitter, Manager};
 use tuya_protocol::{
@@ -74,7 +74,7 @@ fn load_dp_file(
     let canonical_path = PathBuf::from(path.clone())
         .canonicalize()
         .map_err(|err| AppError::dp_file_failed(&path, err.to_string(), *state.language.lock()))?;
-    let display_path = canonical_path.display().to_string();
+    let display_path = path_for_display(&canonical_path);
     let schema = DpSchema::from_path(canonical_path)
         .map_err(|err| AppError::dp_file_failed(&path, err.to_string(), *state.language.lock()))?;
     let simulator = DpSimulator::with_schema(&schema);
@@ -89,6 +89,27 @@ fn load_dp_file(
         network: state.network.lock().clone(),
         dp_file_path: Some(display_path),
     })
+}
+
+fn path_for_display(path: &Path) -> String {
+    let raw = path.display().to_string();
+    // Windows canonicalize 会添加扩展路径前缀；文件访问保留 PathBuf，界面只展示常规路径。
+    #[cfg(windows)]
+    {
+        normalize_windows_display_path(&raw)
+    }
+    #[cfg(not(windows))]
+    {
+        raw
+    }
+}
+
+#[cfg(any(windows, test))]
+fn normalize_windows_display_path(path: &str) -> String {
+    if let Some(unc_path) = path.strip_prefix(r"\\?\UNC\") {
+        return format!(r"\\{unc_path}");
+    }
+    path.strip_prefix(r"\\?\").unwrap_or(path).to_string()
 }
 
 #[tauri::command]
@@ -485,5 +506,21 @@ mod tests {
             assert_eq!(environment.install_mode, "native");
             assert!(environment.can_install_in_app);
         }
+    }
+
+    #[test]
+    fn windows_extended_paths_are_normalized_for_display() {
+        assert_eq!(
+            normalize_windows_display_path(r"\\?\C:\Users\tester\Downloads\debug.json"),
+            r"C:\Users\tester\Downloads\debug.json"
+        );
+        assert_eq!(
+            normalize_windows_display_path(r"\\?\UNC\server\share\debug.json"),
+            r"\\server\share\debug.json"
+        );
+        assert_eq!(
+            normalize_windows_display_path(r"C:\Users\tester\debug.json"),
+            r"C:\Users\tester\debug.json"
+        );
     }
 }

@@ -32,21 +32,21 @@ export function LogPanel({
         <h2>{t("logs.title")}</h2>
         <div>
           <button
-            className={mode === "all" ? "active" : "icon"}
+            className={`log-mode-button ${mode === "all" ? "active" : ""}`}
             title={t("logs.allTitle")}
             onClick={() => onModeChange("all")}
           >
             {t("logs.all")}
           </button>
           <button
-            className={mode === "frame" ? "active" : "icon"}
+            className={`log-mode-button ${mode === "frame" ? "active" : ""}`}
             title={t("logs.frameTitle")}
             onClick={() => onModeChange("frame")}
           >
             {t("logs.frames")}
           </button>
           <button
-            className={mode === "raw" ? "active" : "icon"}
+            className={`log-mode-button ${mode === "raw" ? "active" : ""}`}
             title={t("logs.rawTitle")}
             onClick={() => onModeChange("raw")}
           >

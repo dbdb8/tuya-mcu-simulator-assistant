@@ -185,7 +185,7 @@ export default function App() {
     setPorts(nextPorts);
     setPortName((current) => current || nextPorts[0] || "");
     if (nextPorts.length === 0) {
-      setStatus(t("status.noPorts"));
+      setStatus(i18n.t("status.noPorts"));
     }
   }
 
@@ -214,10 +214,13 @@ export default function App() {
     setNetwork(state.network);
     setDpPath(state.dp_file_path ?? path);
     localStorage.setItem(STORAGE_KEYS.dpFilePath, state.dp_file_path ?? path);
+    // 自动恢复和文件加载都是异步操作，完成时读取 i18n 当前语言，避免首次渲染闭包仍保留中文。
     setStatus(
-      t(restored ? "status.restoredDp" : "status.loadedDp", { count: state.schema?.points.length ?? 0 }),
+      i18n.t(restored ? "status.restoredDp" : "status.loadedDp", {
+        count: state.schema?.points.length ?? 0,
+      }),
     );
-    timer.pauseAllTimerTasks(t("status.loadedDp", { count: state.schema?.points.length ?? 0 }));
+    timer.pauseAllTimerTasks(i18n.t("status.loadedDp", { count: state.schema?.points.length ?? 0 }));
   }
 
   async function chooseDpFile() {

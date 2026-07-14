@@ -244,7 +244,7 @@ function TimerTaskCard({ task, ...props }: Props & { task: TimerTask }) {
         ) : null}
       </div>
       <datalist id="timer-group-options">
-        {["defaultGroup", "sensorGroup", "massageGroup", "eventGroup"].map((name) => (
+        {["defaultGroup", "stateGroup", "scenarioGroup", "eventGroup"].map((name) => (
           <option key={name} value={t(`timer.${name}`)} />
         ))}
       </datalist>

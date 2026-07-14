@@ -35,7 +35,7 @@ tuya-mcu-simulator-assistant
 
 - `tuya_protocol`：只负责通用帧格式，不关心设备业务。
 - `dp_schema`：把 Debugfile 转成统一 DP 元数据，提供 `by_id`、`by_code` 查询。
-- `chair_simulator`：维护当前 DP 值，处理 App/模组下发和用户主动上报。
+- `dp_simulator`：维护当前 DP 值，处理 App/模组下发和用户主动上报。
 - `serial_runtime`：串口读写、半包/粘包解析、命令路由、自动回复、日志解释。
 - `main.tsx`：调试工作台、设置菜单、相关指令弹窗、定时上报任务调度。
 
@@ -128,7 +128,7 @@ tuya-mcu-simulator-assistant
 1. 用户打开应用。
 2. 应用只恢复上次选择的串口、波特率、Debugfile 路径显示，不自动加载任何内置 Profile。
 3. 用户手动选择 Debugfile JSON。
-4. 后端解析 Debugfile，生成 `DpSchema`，初始化 `ChairSimulator` 默认 DP 状态。
+4. 后端解析 Debugfile，生成 `DpSchema`，初始化 `DpSimulator` 默认 DP 状态。
 5. 用户选择串口和波特率，默认 `9600`。
 6. 点击“开始调试”。
 7. 后端同步打开串口，成功后再启动后台读写线程。
@@ -323,12 +323,12 @@ sequenceDiagram
 
 - 收到 `0x06` 后按 DP id 查 `DpSchema`。
 - 解码 payload 得到 JSON 值。
-- 保存到 `ChairSimulator.values`。
+- 保存到 `DpSimulator.values`。
 - 生成 `DpReport`。
 - 用 `0x07` 主动上报。
 - 立即 emit `sim-state`，页面以真实后端状态覆盖显示。
 
-当前不再内置设备专有联动，例如直排沙发 `all_switch` 联动三个位开关，或智能椅腰托/按摩业务动作。后续如果要做新设备模拟器，可以在 `apply_dp_code()` 或新的设备状态机层中增加联动规则。
+默认通用层只负责 DP 的解析、状态保存和主动上报，不包含任何产品业务联动。确有需要时，应在独立的可选扩展层实现产品自定义规则，避免影响通用协议行为。
 
 ### 8.2 全量 DP 查询
 
@@ -492,22 +492,15 @@ sequenceDiagram
 8. App 下发任意 DP，确认页面保存最新状态并 `0x07` 回报。
 9. App 查询全部状态，确认所有 DP 都能上报。
 
-### 12.3 再补设备业务联动
+### 12.3 再补可选业务扩展
 
-如果设备有专有行为，例如：
-
-- 一个总开关联动多个子开关。
-- 电机动作需要模拟位置变化和最终 stop。
-- 按摩/倒计时需要周期上报剩余时间。
-- 隐私模式需要停止敏感数据上报。
-- 恢复出厂需要清理本地状态。
-- raw DP 有 CRC 或私有 payload 格式。
+通用流程验收完成后，如果目标产品存在 Debugfile 无法表达的状态联动、时序变化、本地数据处理或自定义 payload，再增加独立扩展层。
 
 建议做法：
 
 - 不要改 `tuya_protocol`。
 - 不要把设备业务写进 Debugfile 解析层。
-- 在状态机层增加设备专用策略，例如新增 `DeviceSimulator` trait 或独立 profile 模块。
+- 在独立状态机层增加可选产品策略，例如新增 `DeviceSimulator` trait 或独立 profile 模块。
 - 每个业务联动都写测试，覆盖“下发 -> 保存 -> 联动 -> 主动上报”的完整链路。
 
 ### 12.4 对齐真实 MCU

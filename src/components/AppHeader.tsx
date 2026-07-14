@@ -29,6 +29,17 @@ export function AppHeader({
   onToggleSettings: () => void;
 }) {
   const { t } = useTranslation();
+  const configModeLabel = schema
+    ? t(
+        schema.config_mode === 0
+          ? "app.configModeDefault"
+          : schema.config_mode === 1
+            ? "app.configModeLowPower"
+            : schema.config_mode === 2
+              ? "app.configModeAntiMisoperation"
+              : "app.configModeCustom",
+      )
+    : "";
   return (
     <header className="topbar">
       <div className="brand">
@@ -37,7 +48,7 @@ export function AppHeader({
           <h1>{t("app.title")}</h1>
           <p>
             {schema
-              ? `PID ${schema.product_key} / MCU ${schema.mcu_version} / m=${schema.config_mode} ${schema.config_mode_label} / DP ${schema.points.length}`
+              ? `PID ${schema.product_key} / MCU ${schema.mcu_version} / m=${schema.config_mode} ${configModeLabel} / DP ${schema.points.length}`
               : t("app.noProfile")}
           </p>
         </div>

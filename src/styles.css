@@ -617,6 +617,21 @@ label span {
   gap: 6px;
 }
 
+.logs .panel-head {
+  gap: 8px;
+}
+
+.logs .panel-head > div {
+  gap: 5px;
+}
+
+.log-mode-button {
+  min-width: 38px;
+  padding-inline: 8px;
+  justify-content: center;
+  white-space: nowrap;
+}
+
 .search {
   width: 260px;
 }
@@ -760,9 +775,17 @@ label span {
 
 .dp-control {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 58px;
+  grid-template-columns: minmax(0, 1fr) 76px;
   gap: 8px;
   align-items: center;
+}
+
+.dp-control button {
+  width: 100%;
+  min-width: 0;
+  padding-inline: 8px;
+  justify-content: center;
+  white-space: nowrap;
 }
 
 .dp-control input[type="checkbox"] {
@@ -786,6 +809,7 @@ label span {
 
 .update-state {
   min-height: 110px;
+  margin: 0 20px;
   display: flex;
   gap: 12px;
   align-items: center;
@@ -800,7 +824,7 @@ label span {
 .update-details,
 .update-error,
 .update-progress {
-  margin-top: 14px;
+  margin: 14px 20px 0;
   border: 1px solid #2b3d50;
   border-radius: 6px;
   background: #101820;
@@ -880,9 +904,11 @@ label span {
 
 .modal-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   justify-content: flex-end;
   margin-top: 18px;
+  padding: 0 20px 20px;
 }
 
 .language-modal {
@@ -893,7 +919,7 @@ label span {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
-  margin-top: 18px;
+  margin: 18px 16px 16px;
 }
 
 .language-segments button {
@@ -935,5 +961,30 @@ label span {
 
   .timer-card-head {
     flex-wrap: wrap;
+  }
+}
+
+@media (max-width: 600px) {
+  .modal-backdrop {
+    padding: 12px;
+  }
+
+  .update-state {
+    margin-inline: 12px;
+  }
+
+  .update-details,
+  .update-error,
+  .update-progress {
+    margin-inline: 12px;
+  }
+
+  .modal-actions {
+    padding: 0 12px 12px;
+  }
+
+  .language-segments {
+    grid-template-columns: 1fr;
+    margin: 14px 12px 12px;
   }
 }

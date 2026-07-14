@@ -92,7 +92,7 @@ jobs:
           npm run tauri -- build --config src-tauri/tauri.release.conf.json --target universal-apple-darwin
 
       - name: Upload installers
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           # 上传 bundle 目录，保留各系统原生安装包：Windows exe/msi、macOS dmg/app、Ubuntu deb/AppImage。
           name: ${{ matrix.artifact }}

@@ -32,10 +32,16 @@ function addPlatform(key, artifact) {
   const signaturePath = `${artifact}.sig`;
   if (!fs.existsSync(signaturePath)) throw new Error(`缺少签名文件：${signaturePath}`);
   const name = path.basename(artifact);
+  // GitHub Release 会把资产文件名中的空白规范化为点号；元数据必须使用上传后的真实名称，否则下载返回 404。
+  const releaseAssetName = githubReleaseAssetName(name);
   platforms[key] = {
     signature: fs.readFileSync(signaturePath, "utf8").trim(),
-    url: `https://github.com/${repository}/releases/download/${tag}/${encodeURIComponent(name)}`,
+    url: `https://github.com/${repository}/releases/download/${tag}/${encodeURIComponent(releaseAssetName)}`,
   };
+}
+
+function githubReleaseAssetName(name) {
+  return name.trim().replace(/\s+/g, ".");
 }
 function find(patterns) {
   for (const pattern of patterns) {

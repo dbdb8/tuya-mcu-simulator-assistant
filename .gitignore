@@ -1,0 +1,9 @@
+node_modules/
+dist/
+src-tauri/target/
+src-tauri/gen/
+*.log
+# updater 私钥和密码必须放在仓库外；这些规则用于防止误复制后被 Git 收录。
+*.key
+*.key.pub
+*.password.txt

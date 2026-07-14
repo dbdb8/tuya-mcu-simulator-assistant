@@ -1,0 +1,23 @@
+name: Bug report
+description: Report a reproducible defect
+title: "[Bug] "
+body:
+  - type: textarea
+    attributes:
+      label: Description
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Steps to reproduce
+    validations:
+      required: true
+  - type: input
+    attributes:
+      label: Application version and operating system
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Sanitized serial log
+      description: Remove product secrets, local paths, and personal information before posting.

@@ -1,0 +1,380 @@
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
+import { open } from "@tauri-apps/plugin-dialog";
+import { AppHeader } from "./components/AppHeader";
+import { ConnectionToolbar } from "./components/ConnectionToolbar";
+import { ErrorBanner } from "./components/ErrorBanner";
+import { DpPanel } from "./features/dp/DpPanel";
+import { LogPanel, type LogMode } from "./features/logs/LogPanel";
+import { RelatedCommandsModal } from "./features/settings/RelatedCommandsModal";
+import { createSettingsItems, RELATED_COMMANDS } from "./features/settings/settings-config";
+import { TimerReportModal } from "./features/timer/TimerReportModal";
+import { useTimerTasks } from "./features/timer/useTimerTasks";
+import { UpdateModal } from "./features/updater/UpdateModal";
+import { useAppUpdater } from "./features/updater/useAppUpdater";
+import { useTranslation } from "react-i18next";
+import i18n, { changeAppLanguage, type AppLocale } from "./i18n";
+import { LanguageSettingsModal } from "./features/settings/LanguageSettingsModal";
+import { DEFAULT_BAUD_RATE, DEFAULT_DP_PATH, STORAGE_KEYS } from "./constants";
+import type { AppError, BootstrapState, DpPoint, DpSchema, NetworkStatus, SerialLog } from "./types";
+import { groupPoints, normalizeInput } from "./features/dp/dp-utils";
+import {
+  mergeIncomingLog,
+  normalizeError,
+  readStoredNumber,
+  readStoredString,
+  saveLogs,
+} from "./utils/log-utils";
+
+export default function App() {
+  const { t } = useTranslation();
+  const [dpPath, setDpPath] = useState(() => readStoredString(STORAGE_KEYS.dpFilePath, DEFAULT_DP_PATH));
+  const [schema, setSchema] = useState<DpSchema | null>(null);
+  const [values, setValues] = useState<Record<string, unknown>>({});
+  const [ports, setPorts] = useState<string[]>([]);
+  const [portName, setPortName] = useState(() => readStoredString(STORAGE_KEYS.portName, ""));
+  const [baudRate, setBaudRate] = useState(() => readStoredNumber(STORAGE_KEYS.baudRate, DEFAULT_BAUD_RATE));
+  const [serialOpen, setSerialOpen] = useState(false);
+  const [logs, setLogs] = useState<SerialLog[]>([]);
+  const [logMode, setLogMode] = useState<LogMode>("all");
+  const [status, setStatus] = useState(() => i18n.t("status.disconnected"));
+  const [error, setError] = useState<AppError | null>(null);
+  const [busyAction, setBusyAction] = useState<string | null>(null);
+  const [filter, setFilter] = useState("");
+  const [network, setNetwork] = useState<NetworkStatus>({
+    code: 0xff,
+    label: i18n.t("status.unknown"),
+    updated_at_ms: 0,
+  });
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [relatedModalOpen, setRelatedModalOpen] = useState(false);
+  const [timerModalOpen, setTimerModalOpen] = useState(false);
+  const [languageModalOpen, setLanguageModalOpen] = useState(false);
+  const [language, setLanguage] = useState<AppLocale>(() => (i18n.language === "en-US" ? "en-US" : "zh-CN"));
+  const restoredOnce = useRef(false);
+  const timer = useTimerTasks({ schema, serialOpen, network, showError, setStatus });
+  const updater = useAppUpdater({
+    serialOpen,
+    beforeInstall: async () => {
+      // 安装前主动关闭串口，避免后台线程和 COM 口占用影响应用退出与替换文件。
+      await invoke("stop_serial");
+    },
+  });
+  const {
+    timerTasks,
+    collapsedGroups,
+    groupedTimerTasks,
+    addTimerTask,
+    patchTimerTask,
+    duplicateTimerTask,
+    toggleTimerGroup,
+    exportTimerTasks,
+    importTimerTasks,
+    removeTimerTask,
+    clearTimerTasks,
+    addTimerItem,
+    updateTimerItem,
+    removeTimerItem,
+    startTimerTask,
+    pauseTimerTask,
+    runTimerTaskNow,
+  } = timer;
+
+  useEffect(() => {
+    void invoke("set_app_language", { language });
+  }, [language]);
+
+  useEffect(() => {
+    if (!restoredOnce.current) {
+      restoredOnce.current = true;
+      runAction("refreshPorts", () => refreshPorts(), { clearError: false });
+      const storedDpPath = readStoredString(STORAGE_KEYS.dpFilePath, "");
+      if (storedDpPath) {
+        // 关闭后再次打开时自动恢复上次 Debugfile；失败会进入统一错误面板，便于用户知道路径失效。
+        runAction("restoreDpFile", () => loadDp(storedDpPath, true), { clearError: false });
+      }
+    }
+    const unsubs: Array<() => void> = [];
+    listen<SerialLog>("serial-log", (event) => {
+      setLogs((current) => mergeIncomingLog(event.payload, current));
+    }).then((fn) => unsubs.push(fn));
+    listen<boolean>("serial-opened", (event) => {
+      setSerialOpen(event.payload);
+      setStatus(t(event.payload ? "status.serialConnected" : "status.serialClosed"));
+      if (!event.payload) timer.pauseAllTimerTasks(t("status.serialClosed"));
+    }).then((fn) => unsubs.push(fn));
+    listen<AppError>("serial-error", (event) => {
+      showError(event.payload);
+      setStatus(event.payload.title);
+      setSerialOpen(false);
+      timer.pauseAllTimerTasks(event.payload.title);
+    }).then((fn) => unsubs.push(fn));
+    listen<NetworkStatus>("network-status", (event) => {
+      setNetwork(event.payload);
+      timer.resumeNetworkWaitingTasks(event.payload);
+    }).then((fn) => unsubs.push(fn));
+    listen<string>("wifi-action", (event) => setStatus(event.payload)).then((fn) => unsubs.push(fn));
+    listen<Record<string, unknown>>("sim-state", (event) => setValues(event.payload)).then((fn) =>
+      unsubs.push(fn),
+    );
+    return () => unsubs.forEach((fn) => fn());
+    // 语言切换时重建监听回调，使新的状态文案使用当前语言；其余函数通过当前渲染闭包读取。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [language]);
+
+  // 分组名称由 i18n 当前语言生成，因此语言也是必要的重算触发条件。
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const groups = useMemo(() => groupPoints(schema?.points ?? [], filter), [schema, filter, language]);
+
+  async function runAction(
+    name: string,
+    action: () => Promise<void>,
+    options: { clearError?: boolean } = {},
+  ) {
+    setBusyAction(name);
+    if (options.clearError !== false) {
+      setError(null);
+    }
+    try {
+      await action();
+    } catch (err) {
+      showError(normalizeError(err));
+    } finally {
+      setBusyAction((current) => (current === name ? null : current));
+    }
+  }
+
+  function showError(nextError: AppError) {
+    setError(nextError);
+    setStatus(nextError.title);
+    setLogs((current) =>
+      [
+        {
+          direction: "error" as const,
+          title: nextError.title,
+          hex: `${nextError.message} | ${nextError.suggestion} | ${nextError.detail}`,
+          raw: false,
+          timestamp_ms: Date.now(),
+        },
+        ...current,
+      ].slice(0, 600),
+    );
+  }
+
+  async function refreshPorts() {
+    const nextPorts = await invoke<string[]>("list_serial_ports");
+    setPorts(nextPorts);
+    setPortName((current) => current || nextPorts[0] || "");
+    if (nextPorts.length === 0) {
+      setStatus(t("status.noPorts"));
+    }
+  }
+
+  function updatePortName(nextPort: string) {
+    setPortName(nextPort);
+    localStorage.setItem(STORAGE_KEYS.portName, nextPort);
+  }
+
+  function updateBaudRate(nextBaudRate: number) {
+    setBaudRate(nextBaudRate);
+    localStorage.setItem(STORAGE_KEYS.baudRate, String(nextBaudRate));
+  }
+
+  function persistSerialSettings(nextPort: string, nextBaudRate: number) {
+    // 用户点击开始调试时再保存一次，覆盖下拉框未触发 change 的默认选择场景。
+    if (nextPort) {
+      localStorage.setItem(STORAGE_KEYS.portName, nextPort);
+    }
+    localStorage.setItem(STORAGE_KEYS.baudRate, String(nextBaudRate));
+  }
+
+  async function loadDp(path: string, restored = false) {
+    const state = await invoke<BootstrapState>("load_dp_file", { path });
+    setSchema(state.schema);
+    setValues(state.values);
+    setNetwork(state.network);
+    setDpPath(state.dp_file_path ?? path);
+    localStorage.setItem(STORAGE_KEYS.dpFilePath, state.dp_file_path ?? path);
+    setStatus(
+      t(restored ? "status.restoredDp" : "status.loadedDp", { count: state.schema?.points.length ?? 0 }),
+    );
+    timer.pauseAllTimerTasks(t("status.loadedDp", { count: state.schema?.points.length ?? 0 }));
+  }
+
+  async function chooseDpFile() {
+    const selected = await open({
+      multiple: false,
+      filters: [{ name: "Tuya Debugfile", extensions: ["json"] }],
+    });
+    if (typeof selected === "string") {
+      await loadDp(selected);
+    }
+  }
+
+  async function startSerial() {
+    persistSerialSettings(portName, baudRate);
+    await invoke("start_serial", {
+      settings: {
+        port_name: portName,
+        baud_rate: baudRate,
+      },
+    });
+  }
+
+  async function stopSerial() {
+    await invoke("stop_serial");
+  }
+
+  async function updateDp(point: DpPoint, rawValue: unknown) {
+    const value = normalizeInput(point, rawValue);
+    setValues((current) => ({ ...current, [point.code]: value }));
+    await invoke("set_dp_value", { patch: { code: point.code, value } });
+  }
+
+  async function sendWifiReset() {
+    await invoke("wifi_reset");
+    setStatus(t("status.wifiReset"));
+  }
+
+  async function sendWifiMode(mode: 0 | 1) {
+    await invoke("set_wifi_mode", { mode });
+    setStatus(t(mode === 0 ? "status.wifiEz" : "status.wifiAp"));
+  }
+
+  async function sendRelatedCommand(command: string, labelKey: string) {
+    await invoke(command);
+    setStatus(t("status.sent", { label: t(labelKey) }));
+  }
+
+  const settingsItems = createSettingsItems(
+    () => {
+      setSettingsOpen(false);
+      setRelatedModalOpen(true);
+    },
+    () => {
+      setSettingsOpen(false);
+      setTimerModalOpen(true);
+    },
+    () => {
+      setSettingsOpen(false);
+      setLanguageModalOpen(true);
+    },
+    {
+      onOpen: () => {
+        setSettingsOpen(false);
+        updater.openModal();
+      },
+      hasUpdate: updater.hasUpdate,
+      version: updater.availableVersion,
+      checking: updater.state === "checking",
+      failed: updater.state === "error",
+    },
+  );
+
+  return (
+    <main>
+      <AppHeader
+        schema={schema}
+        status={status}
+        network={network}
+        settingsOpen={settingsOpen}
+        settingsItems={settingsItems}
+        onToggleSettings={() => setSettingsOpen((open) => !open)}
+      />
+      <ConnectionToolbar
+        ports={ports}
+        portName={portName}
+        baudRate={baudRate}
+        dpPath={dpPath}
+        schema={schema}
+        serialOpen={serialOpen}
+        busyAction={busyAction}
+        onPortChange={updatePortName}
+        onBaudChange={updateBaudRate}
+        onRefresh={() => runAction("refreshPorts", refreshPorts)}
+        onChooseFile={() => runAction("chooseDpFile", chooseDpFile)}
+        onStart={() => runAction("startSerial", startSerial)}
+        onStop={() => runAction("stopSerial", stopSerial)}
+        onWifiReset={() => runAction("wifiReset", sendWifiReset)}
+        onWifiMode={(mode) => runAction(mode === 0 ? "wifiEz" : "wifiAp", () => sendWifiMode(mode))}
+      />
+      <ErrorBanner error={error} onClose={() => setError(null)} />
+      <RelatedCommandsModal
+        open={relatedModalOpen}
+        schema={schema}
+        serialOpen={serialOpen}
+        busyAction={busyAction}
+        commands={RELATED_COMMANDS}
+        onClose={() => setRelatedModalOpen(false)}
+        onSend={(item) => runAction(item.key, () => sendRelatedCommand(item.command, item.labelKey))}
+      />
+      <TimerReportModal
+        open={timerModalOpen}
+        schema={schema}
+        serialOpen={serialOpen}
+        tasks={timerTasks}
+        groupedTasks={groupedTimerTasks}
+        collapsedGroups={collapsedGroups}
+        onClose={() => setTimerModalOpen(false)}
+        onImport={() => runAction("importTimers", importTimerTasks)}
+        onExport={() => runAction("exportTimers", exportTimerTasks)}
+        onClear={clearTimerTasks}
+        onAddTask={addTimerTask}
+        onToggleGroup={toggleTimerGroup}
+        onPatchTask={patchTimerTask}
+        onStart={startTimerTask}
+        onPause={pauseTimerTask}
+        onRunNow={(taskId) => runTimerTaskNow(taskId, false)}
+        onDuplicate={duplicateTimerTask}
+        onRemoveTask={removeTimerTask}
+        onAddItem={addTimerItem}
+        onUpdateItem={updateTimerItem}
+        onRemoveItem={removeTimerItem}
+      />
+      <UpdateModal
+        open={updater.modalOpen}
+        state={updater.state}
+        currentVersion={updater.currentVersion}
+        availableVersion={updater.availableVersion}
+        notes={updater.notes}
+        publishedAt={updater.publishedAt}
+        progress={updater.progress}
+        error={updater.error}
+        environment={updater.environment}
+        serialOpen={serialOpen}
+        onClose={updater.dismiss}
+        onCheck={() => void updater.checkForUpdates(false)}
+        onInstall={() => void updater.downloadAndInstall()}
+        onOpenRelease={() => void updater.openReleasePage()}
+      />
+      <LanguageSettingsModal
+        open={languageModalOpen}
+        language={language}
+        onClose={() => setLanguageModalOpen(false)}
+        onChange={(nextLanguage) => {
+          setLanguage(nextLanguage);
+          void changeAppLanguage(nextLanguage);
+        }}
+      />
+      <div className="workspace no-simulator">
+        <LogPanel
+          logs={logs}
+          mode={logMode}
+          busy={busyAction === "saveLogs"}
+          onModeChange={setLogMode}
+          onSave={() => runAction("saveLogs", () => saveLogs(logs))}
+          onClear={() => setLogs([])}
+        />
+        <DpPanel
+          schema={schema}
+          groups={groups}
+          values={values}
+          filter={filter}
+          onFilterChange={setFilter}
+          onReport={(point, value) => runAction(`dp-${point.id}`, () => updateDp(point, value))}
+        />
+      </div>
+    </main>
+  );
+}

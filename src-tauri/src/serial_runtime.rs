@@ -267,13 +267,16 @@ fn run_loop(
                         &app,
                     );
                     for response in response_frames {
+                        // parking_lot::Mutex 不可重入；同一表达式连续 lock 两次会让串口线程等待自身，
+                        // 从而出现只有 RX、没有心跳 TX，并导致停止调试 join 永久等待。
+                        let language = *state.language.lock();
                         write_frame(
                             &mut port,
                             &app,
                             &schema,
-                            sdk_tx_title(response.get(3).copied(), *state.language.lock()),
+                            sdk_tx_title(response.get(3).copied(), language),
                             &response,
-                            *state.language.lock(),
+                            language,
                         )?;
                     }
                     emit_state(&app, &state);

@@ -96,32 +96,50 @@ export default function App() {
       }
     }
     const unsubs: Array<() => void> = [];
-    listen<SerialLog>("serial-log", (event) => {
-      setLogs((current) => mergeIncomingLog(event.payload, current));
-    }).then((fn) => unsubs.push(fn));
-    listen<boolean>("serial-opened", (event) => {
-      setSerialOpen(event.payload);
-      setStatus(t(event.payload ? "status.serialConnected" : "status.serialClosed"));
-      if (!event.payload) timer.pauseAllTimerTasks(t("status.serialClosed"));
-    }).then((fn) => unsubs.push(fn));
-    listen<AppError>("serial-error", (event) => {
-      showError(event.payload);
-      setStatus(event.payload.title);
-      setSerialOpen(false);
-      timer.pauseAllTimerTasks(event.payload.title);
-    }).then((fn) => unsubs.push(fn));
-    listen<NetworkStatus>("network-status", (event) => {
-      setNetwork(event.payload);
-      timer.resumeNetworkWaitingTasks(event.payload);
-    }).then((fn) => unsubs.push(fn));
-    listen<string>("wifi-action", (event) => setStatus(event.payload)).then((fn) => unsubs.push(fn));
-    listen<Record<string, unknown>>("sim-state", (event) => setValues(event.payload)).then((fn) =>
-      unsubs.push(fn),
+    let disposed = false;
+    const trackUnlisten = (registration: Promise<() => void>) => {
+      void registration.then((unlisten) => {
+        // Tauri listen 是异步注册的；StrictMode 可能先执行 cleanup，再返回 unlisten。
+        // 注册完成时若组件已卸载，需要立即取消，避免一条后端事件被多个残留监听重复显示。
+        if (disposed) unlisten();
+        else unsubs.push(unlisten);
+      });
+    };
+    trackUnlisten(
+      listen<SerialLog>("serial-log", (event) => {
+        setLogs((current) => mergeIncomingLog(event.payload, current));
+      }),
     );
-    return () => unsubs.forEach((fn) => fn());
-    // 语言切换时重建监听回调，使新的状态文案使用当前语言；其余函数通过当前渲染闭包读取。
+    trackUnlisten(
+      listen<boolean>("serial-opened", (event) => {
+        setSerialOpen(event.payload);
+        setStatus(i18n.t(event.payload ? "status.serialConnected" : "status.serialClosed"));
+        if (!event.payload) timer.pauseAllTimerTasks(i18n.t("status.serialClosed"));
+      }),
+    );
+    trackUnlisten(
+      listen<AppError>("serial-error", (event) => {
+        showError(event.payload);
+        setStatus(event.payload.title);
+        setSerialOpen(false);
+        timer.pauseAllTimerTasks(event.payload.title);
+      }),
+    );
+    trackUnlisten(
+      listen<NetworkStatus>("network-status", (event) => {
+        setNetwork(event.payload);
+        timer.resumeNetworkWaitingTasks(event.payload);
+      }),
+    );
+    trackUnlisten(listen<string>("wifi-action", (event) => setStatus(event.payload)));
+    trackUnlisten(listen<Record<string, unknown>>("sim-state", (event) => setValues(event.payload)));
+    return () => {
+      disposed = true;
+      unsubs.forEach((unlisten) => unlisten());
+    };
+    // 监听在应用生命周期内只注册一次；动态语言文案通过 i18n 当前状态读取。
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [language]);
+  }, []);
 
   // 分组名称由 i18n 当前语言生成，因此语言也是必要的重算触发条件。
   // eslint-disable-next-line react-hooks/exhaustive-deps

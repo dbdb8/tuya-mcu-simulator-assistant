@@ -17,6 +17,26 @@ A cross-platform desktop tool built with Tauri, React, and Rust. It connects a c
 - Switches between Simplified Chinese and English.
 - Builds for Windows, macOS, and Ubuntu with signed application updates.
 
+## Screenshots
+
+### Main workbench
+
+After loading a Debugfile and opening the serial port, the workbench shows validated protocol traffic, network state, and current DP values. It also supports manual DP reports and Wi-Fi provisioning actions.
+
+![English main workbench](docs/images/en-US/main-workbench.png)
+
+### Scheduled reports
+
+Scheduled tasks support multiple DPs, fixed or random timing, manual value rotation, random values, run limits, and network-state gates.
+
+![English scheduled reports](docs/images/en-US/scheduled-reports.png)
+
+### Settings menu
+
+The settings menu provides related protocol commands, scheduled reports, language selection, and software update controls.
+
+![English settings menu](docs/images/en-US/settings-menu.png)
+
 ## Development
 
 Node.js 20+, Rust stable, and the platform-specific Tauri build dependencies are required.

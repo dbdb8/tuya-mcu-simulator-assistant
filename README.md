@@ -17,6 +17,26 @@
 - 中文和英文界面切换。
 - Windows、macOS 和 Ubuntu 构建及签名软件更新。
 
+## 界面预览
+
+### 主工作台
+
+加载 Debugfile 并打开串口后，可以查看完整协议日志、网络状态和当前 DP，同时手动触发 DP 上报及 Wi-Fi 配网操作。
+
+![中文主工作台](docs/images/zh-CN/main-workbench.png)
+
+### 定时上报
+
+定时任务支持多个 DP、固定或随机周期、手动值轮询、随机值、执行次数和网络状态触发。
+
+![中文定时上报](docs/images/zh-CN/scheduled-reports.png)
+
+### 设置菜单
+
+设置菜单集中提供相关指令、定时上报、界面语言和软件更新入口。
+
+![中文设置菜单](docs/images/zh-CN/settings-menu.png)
+
 ## 开发
 
 要求 Node.js 20+、Rust stable 和对应平台的 Tauri 构建依赖。

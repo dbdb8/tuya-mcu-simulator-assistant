@@ -1,6 +1,6 @@
 [package]
 name = "tuya-mcu-simulator-assistant"
-version = "0.1.0"
+version = "0.1.2"
 description = "Cross-platform assistant for simulating a Tuya-compatible MCU over serial"
 license = "MIT"
 repository = "https://github.com/dbdb8/tuya-mcu-simulator-assistant"

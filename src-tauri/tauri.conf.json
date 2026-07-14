@@ -1,0 +1,42 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Tuya MCU Simulator Assistant",
+  "version": "0.1.0",
+  "identifier": "io.github.dbdb8.tuya-mcu-simulator-assistant",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "涂鸦 MCU 模拟调试助手",
+        "width": 1320,
+        "height": 820,
+        "minWidth": 1120,
+        "minHeight": 680,
+        "theme": "Dark",
+        "backgroundColor": "#11161D"
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "createUpdaterArtifacts": false,
+    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.ico"]
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://github.com/dbdb8/tuya-mcu-simulator-assistant/releases/latest/download/latest.json"
+      ],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDkyQzFCMjc4OTkyNzAwMjgKUldRb0FDZVplTExCa3BSakRMNE8vSTJ1RjIzWGFtZUgzSEtKaGNJaHZoS1pFK1liNW1BMWV2Yk4K"
+    }
+  }
+}

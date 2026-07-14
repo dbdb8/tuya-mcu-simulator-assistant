@@ -1,0 +1,156 @@
+name: Build installers
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.label }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: windows
+            os: windows-latest
+            artifact: windows-installers
+          - label: macos
+            os: macos-latest
+            artifact: macos-universal-installers
+          - label: ubuntu
+            os: ubuntu-22.04
+            artifact: ubuntu-installers
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Ubuntu Tauri dependencies
+        if: matrix.os == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            pkg-config \
+            libudev-dev \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install macOS universal Rust targets
+        if: startsWith(matrix.os, 'macos')
+        run: |
+          # macOS 通用包同时包含 Intel x64 和 Apple Silicon arm64，避免用户下载到不支持当前 Mac 的单架构包。
+          rustup target add x86_64-apple-darwin aarch64-apple-darwin
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Verify release version
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: npm run version:check
+
+      - name: Run Rust tests
+        run: cargo test --manifest-path src-tauri/Cargo.toml
+
+      - name: Build Tauri installer
+        if: "!startsWith(matrix.os, 'macos')"
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: npm run tauri:build:updater
+
+      - name: Build universal macOS installer
+        if: startsWith(matrix.os, 'macos')
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          # 生成 universal-apple-darwin 的 .app/.dmg，Release 中只需要给 Mac 用户分发这个通用 dmg。
+          npm run tauri -- build --config src-tauri/tauri.release.conf.json --target universal-apple-darwin
+
+      - name: Upload installers
+        uses: actions/upload-artifact@v4
+        with:
+          # 上传 bundle 目录，保留各系统原生安装包：Windows exe/msi、macOS dmg/app、Ubuntu deb/AppImage。
+          name: ${{ matrix.artifact }}
+          path: |
+            src-tauri/target/release/bundle
+            src-tauri/target/universal-apple-darwin/release/bundle
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub Release
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: build
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Download all platform artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: Build release notes
+        shell: bash
+        run: |
+          previous_tag="$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || true)"
+          if [ -n "$previous_tag" ]; then
+            git log "$previous_tag..HEAD" --pretty=format:'- %s' > release-notes.txt
+          else
+            printf '%s\n' "Tuya MCU Simulator ${{ github.ref_name }}" > release-notes.txt
+          fi
+
+      - name: Generate updater latest.json
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_NOTES_FILE: release-notes.txt
+        run: node scripts/generate-latest-json.mjs release-assets
+
+      - name: Upload installers and updater metadata
+        uses: softprops/action-gh-release@v2
+        with:
+          body_path: release-notes.txt
+          files: |
+            release-assets/**/*.dmg
+            release-assets/**/*.msi
+            release-assets/**/*.exe
+            release-assets/**/*.deb
+            release-assets/**/*.AppImage
+            release-assets/**/*.zip
+            release-assets/**/*.tar.gz
+            release-assets/**/*.sig
+            release-assets/latest.json
+          fail_on_unmatched_files: false

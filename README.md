@@ -12,6 +12,7 @@
 - `55 AA` 协议帧解析、心跳、产品信息、工作模式、配网状态和 DP 查询。
 - 保存 App/模组下发的最新 DP，并主动回报当前状态。
 - DP 手动上报、批量/逐个定时上报、随机值和多值轮询。
+- 支持 QuickJS 沙箱中的 JavaScript 动态任务，一次生成多个关联 DP、时间戳、序号、Raw 和 CRC。
 - Wi-Fi reset、EZ/AP 配网和常用扩展指令。
 - 完整帧与 Raw 串口日志、协议语义解释和日志导出。
 - 中文和英文界面切换。
@@ -138,7 +139,7 @@ cargo test --manifest-path src-tauri/Cargo.toml
 3. 选择串口和波特率，默认波特率为 `9600`。
 4. 点击“开始调试”，观察初始化、配网和 DP 交互日志。
 
-详细实现见[开发指南](docs/tuya-mcu-simulator-development-guide.md)，发布与自动更新见[发布指南](docs/software-update-release-guide.md)。
+详细实现见[开发指南](docs/tuya-mcu-simulator-development-guide.md)，动态任务编写见 [JavaScript 定时上报脚本教程](docs/javascript-timer-script-guide.md)，发布与自动更新见[发布指南](docs/software-update-release-guide.md)。
 
 ## 贡献与安全
 

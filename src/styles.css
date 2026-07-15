@@ -357,13 +357,63 @@ h3 {
 
 .timer-group-head {
   min-height: 38px;
-  justify-content: flex-start;
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid #2d4257;
+  border-radius: 6px;
   background: #101820;
 }
 
-.timer-group-head span {
+.timer-group-toggle {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 auto;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 0;
+  background: transparent;
+  text-align: left;
+}
+
+.timer-group-toggle:hover {
+  background: #14212d;
+}
+
+.timer-group-head span,
+.timer-group-actions span {
   color: #91a2b6;
   font-size: 12px;
+}
+
+.timer-group-count {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.timer-group-summary {
+  min-width: 0;
+  overflow: hidden;
+  flex: 1 1 auto;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.timer-group-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+  padding-right: 7px;
+}
+
+.timer-group-actions button {
+  min-height: 30px;
+  padding: 5px 8px;
+  white-space: nowrap;
 }
 
 .timer-card {
@@ -379,6 +429,21 @@ h3 {
   display: flex;
   align-items: center;
   gap: 10px;
+}
+
+.timer-card.collapsed .timer-card-head {
+  border-bottom: 0;
+}
+
+.timer-task-toggle {
+  flex: 0 0 auto;
+}
+
+.timer-task-error {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  color: #f87171;
 }
 
 .timer-card-head input {
@@ -493,6 +558,119 @@ h3 {
 
 .timer-items {
   padding-bottom: 12px;
+}
+
+.generation-mode {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 12px 0;
+}
+
+.generation-mode button.active {
+  border-color: #38bdf8;
+  background: #123047;
+  color: #e0f2fe;
+}
+
+.script-editor {
+  overflow: hidden;
+  margin-top: 12px;
+  border: 1px solid #2b3d50;
+  border-radius: 6px;
+  background: #0d141c;
+}
+
+.script-editor-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  padding: 10px 12px;
+  border-bottom: 1px solid #2b3d50;
+}
+
+.script-editor-head > div {
+  display: grid;
+  gap: 3px;
+  margin-right: auto;
+}
+
+.script-editor-head span {
+  color: #91a2b6;
+  font-size: 12px;
+}
+
+.script-editor-loading {
+  display: grid;
+  height: 320px;
+  place-items: center;
+  color: #91a2b6;
+}
+
+.script-state-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  padding: 12px;
+  border-top: 1px solid #2b3d50;
+}
+
+.script-state-grid label {
+  display: grid;
+  gap: 6px;
+}
+
+.script-state-grid textarea {
+  min-height: 108px;
+  resize: vertical;
+  font-family: Consolas, "Courier New", monospace;
+}
+
+.script-preview {
+  padding: 0 12px 12px;
+}
+
+.script-preview pre {
+  max-height: 240px;
+  margin: 8px 0 0;
+  padding: 10px;
+  overflow: auto;
+  border: 1px solid #293a4b;
+  border-radius: 4px;
+  background: #091017;
+  color: #b8c5d4;
+  white-space: pre-wrap;
+}
+
+.script-import-modal {
+  width: min(620px, calc(100vw - 32px));
+}
+
+.script-import-summary {
+  display: grid;
+  gap: 8px;
+  padding: 14px 20px 0;
+}
+
+.script-import-summary > code {
+  overflow-wrap: anywhere;
+  color: #93c5fd;
+}
+
+.script-import-summary > div {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  padding: 9px 10px;
+  border: 1px solid #2b3d50;
+  border-radius: 5px;
+}
+
+.script-import-summary span {
+  color: #91a2b6;
+  font-size: 12px;
 }
 
 .timer-items-head {
@@ -988,12 +1166,23 @@ label span {
 
   .timer-grid,
   .timer-options,
-  .timer-item {
+  .timer-item,
+  .script-state-grid {
     grid-template-columns: 1fr;
   }
 
   .timer-card-head {
     flex-wrap: wrap;
+  }
+
+  .timer-group-head {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .timer-group-actions {
+    justify-content: flex-end;
+    padding: 0 7px 7px;
   }
 }
 

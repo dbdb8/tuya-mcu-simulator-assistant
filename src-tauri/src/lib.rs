@@ -2,6 +2,7 @@ mod dp_schema;
 mod dp_simulator;
 mod language;
 mod serial_runtime;
+mod timer_script;
 mod tuya_protocol;
 
 use dp_schema::DpSchema;
@@ -18,6 +19,7 @@ use tauri::{
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     Emitter, Manager,
 };
+use timer_script::{TimerScriptRequest, TimerScriptResponse};
 use tuya_protocol::{
     CMD_GET_GREEN_TIME, CMD_GET_LOCAL_TIME, CMD_GET_MAC, CMD_GET_WIFI_STATUS, CMD_HEARTBEAT_STOP,
     CMD_NEW_FUNCTION_NOTICE, CMD_QUERY_MEMORY, CMD_QUERY_SIGNAL_STRENGTH,
@@ -388,6 +390,33 @@ fn report_dp_batch(
 }
 
 #[tauri::command]
+fn execute_timer_script(
+    request: TimerScriptRequest,
+    state: tauri::State<Arc<AppState>>,
+) -> Result<TimerScriptResponse, AppError> {
+    let language = *state.language.lock();
+    let schema = state.schema.lock().clone().ok_or_else(|| AppError {
+        code: "dp_file_required".into(),
+        title: language
+            .text("请先加载 DP 文件", "Load a DP file first")
+            .into(),
+        message: language
+            .text(
+                "脚本生成上报数据前需要加载 Debugfile。",
+                "Load a Debugfile before generating script reports.",
+            )
+            .into(),
+        detail: "schema is empty".into(),
+        suggestion: language
+            .text("请先加载 Debugfile JSON。", "Load a Debugfile JSON first.")
+            .into(),
+    })?;
+    let values = state.simulator.lock().values_json();
+    let network = state.network.lock().clone();
+    timer_script::execute(request, &schema, values, network, language)
+}
+
+#[tauri::command]
 fn save_log_file(
     path: String,
     content: String,
@@ -532,6 +561,7 @@ pub fn run() {
             send_new_function_notice,
             set_dp_value,
             report_dp_batch,
+            execute_timer_script,
             save_log_file,
             load_text_file,
             get_update_environment,

@@ -401,6 +401,32 @@ sequenceDiagram
 - 支持按网络状态触发，例如已连云后才开始。
 - 支持分组展示和一键清空全部定时任务。
 
+### 9.4 JavaScript 动态上报
+
+任务可切换为 JavaScript 生成模式。脚本在 Rust QuickJS 沙箱中执行，不具备文件、网络、环境变量、进程或串口访问权限，只能返回当前 Debugfile 中定义的 DP：
+
+```javascript
+function generate(ctx) {
+  return {
+    reports: [
+      { code: "status", value: "running" },
+      { code: "raw_data", value: raw([1, 2, 3]) },
+    ],
+    state: { seq: Number(ctx.state.seq || 0) + 1 },
+    summary: "dynamic report",
+  };
+}
+```
+
+- `ctx` 提供当前时间、任务次数、持久化状态、当前 DP 值、Schema 和网络状态。
+- 支持随机数、小端整数、CRC16-Modbus、hex、JSON 和 Raw 帮助函数。
+- 后端会再次校验 DP 是否存在、类型、枚举、范围、步长和长度。
+- 只有串口发送成功后才提交脚本状态；预览不会改变状态。
+- `skip=true` 可保存状态并跳过本次发送，但不会增加成功上报次数。
+- 导入包含脚本的任务时必须由用户确认，导入后仍保持未启动。
+
+脚本的创建步骤、完整 `ctx` 字段、DP 类型写法、状态提交规则、Raw 组包、CRC 和排错方法见 [JavaScript 定时动态上报脚本教程](./javascript-timer-script-guide.md)。
+
 ## 10. 相关指令
 
 相关指令入口位于右上角设置菜单。当前实现不把这些按钮放在首页，避免占用调试主界面。

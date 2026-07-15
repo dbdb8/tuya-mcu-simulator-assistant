@@ -9,6 +9,8 @@ Major license families present in the dependency graph include:
 - `caniuse-lite` data under CC-BY-4.0.
 - `webpki-root-certs` under CDLA-Permissive-2.0.
 - Dependencies offering multiple license choices are used under their MIT or Apache-2.0 option where available.
+- `monaco-editor` and `@monaco-editor/react` are used under the MIT License for the offline JavaScript task editor.
+- `rquickjs` and QuickJS bindings are used under their published permissive license terms for sandboxed script execution.
 
 The corresponding license texts, copyright notices, and source locations are available from each package's registry metadata:
 

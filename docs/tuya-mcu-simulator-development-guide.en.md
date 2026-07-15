@@ -72,6 +72,27 @@ sequenceDiagram
 
 Scheduled tasks can report multiple DPs in one frame or sequential frames, rotate manual candidate values, generate constrained random values, wait for a network state, and stop after a run limit. Task configurations can be imported and exported, but they do not auto-start after application restart.
 
+## JavaScript Dynamic Reports
+
+A task can use JavaScript generation mode to return several related DPs in one execution. Scripts run in a Rust QuickJS sandbox without file, network, environment, process, Tauri, or serial APIs.
+
+```javascript
+function generate(ctx) {
+  return {
+    reports: [
+      { code: "status", value: "running" },
+      { code: "raw_data", value: raw([1, 2, 3]) },
+    ],
+    state: { seq: Number(ctx.state.seq || 0) + 1 },
+    summary: "dynamic report",
+  };
+}
+```
+
+The context exposes the current time, run index, persistent script state, current DP values, schema, and network status. Helper functions cover random values, little-endian integers, CRC16-Modbus, hex, JSON, and Raw data. Rust validates every returned DP against the loaded Debugfile. Script state is committed only after a successful serial report; previews never mutate state. Imports containing scripts require explicit confirmation and remain disabled after import.
+
+See the [JavaScript Scheduled Dynamic Report Tutorial](./javascript-timer-script-guide.en.md) for the full creation workflow, context reference, DP value examples, state rules, Raw packet assembly, CRC, and troubleshooting.
+
 ## Troubleshooting and Extension Checklist
 
 1. Compare complete validated frames with the official module assistant; use Raw mode only for physical read chunks.

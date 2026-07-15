@@ -2,7 +2,14 @@ import { invoke } from "@tauri-apps/api/core";
 import { downloadDir, join } from "@tauri-apps/api/path";
 import { STORAGE_KEYS } from "../../constants";
 import type { AppError, DpPoint, DpSchema, NetworkStatus } from "../../types";
-import type { NetworkGate, TimerDpItem, TimerStatus, TimerTask, TimingMode } from "./types";
+import type {
+  NetworkGate,
+  TimerDpItem,
+  TimerScriptConfig,
+  TimerStatus,
+  TimerTask,
+  TimingMode,
+} from "./types";
 import { formatLogTimeForFilename } from "../../utils/log-utils";
 import i18n from "../../i18n";
 
@@ -17,6 +24,24 @@ export function defaultTimerItem(point: DpPoint): TimerDpItem {
     randomMin: defaults.min,
     randomMax: defaults.max,
     randomCandidates: "",
+  };
+}
+
+export const DEFAULT_TIMER_SCRIPT = `function generate(ctx) {
+  return {
+    reports: [],
+    state: ctx.state,
+    summary: "Waiting for script configuration",
+    skip: true,
+  };
+}`;
+
+export function defaultTimerScript(): TimerScriptConfig {
+  return {
+    apiVersion: 1,
+    source: DEFAULT_TIMER_SCRIPT,
+    initialState: {},
+    state: {},
   };
 }
 
@@ -53,7 +78,7 @@ export function validateTimerTask(
       suggestion: i18n.t("timerValidation.openSerialSuggestion"),
     };
   }
-  if (task.items.length === 0) {
+  if (task.generationMode === "items" && task.items.length === 0) {
     return {
       code: "timer_task_empty",
       title: i18n.t("timerValidation.emptyTitle"),
@@ -78,6 +103,13 @@ export function validateTimerTaskConfig(task: TimerTask, schema: DpSchema | null
       (task.networkSpecificCode ?? 0) > 255)
   ) {
     return timerConfigError(task, i18n.t("timerValidation.networkCode"));
+  }
+  if (task.generationMode === "script") {
+    if (!task.script?.source.trim()) return timerConfigError(task, i18n.t("timerValidation.scriptEmpty"));
+    if (task.script.apiVersion !== 1) return timerConfigError(task, i18n.t("timerValidation.scriptVersion"));
+    if (!isPlainObject(task.script.initialState) || !isPlainObject(task.script.state))
+      return timerConfigError(task, i18n.t("timerValidation.scriptState"));
+    return null;
   }
   for (const item of task.items) {
     const point = schema.points.find((dp) => dp.code === item.dpCode);
@@ -301,19 +333,26 @@ export function summarizeTimerPatches(taskName: string, patches: Array<{ code: s
   return text.length > 120 ? `${text.slice(0, 117)}...` : text;
 }
 
-export async function sendTimerPatches(task: TimerTask, patches: Array<{ code: string; value: unknown }>) {
+export async function sendTimerPatches(
+  task: TimerTask,
+  patches: Array<{ code: string; value: unknown }>,
+  scriptSummary?: string,
+) {
+  const title = scriptSummary?.trim()
+    ? `${i18n.t("timer.title")}: ${task.name}, ${scriptSummary.trim().slice(0, 180)}`
+    : undefined;
   if (task.reportMode === "sequential") {
     for (const patch of patches) {
       await invoke("report_dp_batch", {
         patches: [patch],
-        title: summarizeTimerPatches(`${task.name}[${i18n.t("timer.sequential")}]`, [patch]),
+        title: title ?? summarizeTimerPatches(`${task.name}[${i18n.t("timer.sequential")}]`, [patch]),
       });
     }
     return;
   }
   await invoke("report_dp_batch", {
     patches,
-    title: summarizeTimerPatches(`${task.name}[${i18n.t("timer.batch")}]`, patches),
+    title: title ?? summarizeTimerPatches(`${task.name}[${i18n.t("timer.batch")}]`, patches),
   });
 }
 
@@ -390,6 +429,8 @@ export function normalizeTimerTask(raw: Partial<TimerTask> & { items?: TimerDpIt
     maxRuns: typeof raw.maxRuns === "number" && raw.maxRuns > 0 ? raw.maxRuns : null,
     runCount: Number.isFinite(raw.runCount) ? Number(raw.runCount) : 0,
     reportMode: raw.reportMode === "sequential" ? "sequential" : "batch",
+    generationMode: raw.generationMode === "script" ? "script" : "items",
+    script: normalizeTimerScript(raw.script),
     networkGate: ["cloud", "router_or_above", "specific"].includes(String(raw.networkGate))
       ? (raw.networkGate as NetworkGate)
       : "none",
@@ -412,6 +453,20 @@ export function normalizeTimerTask(raw: Partial<TimerTask> & { items?: TimerDpIt
         }))
       : [],
   };
+}
+
+function normalizeTimerScript(raw?: TimerScriptConfig): TimerScriptConfig | undefined {
+  if (!raw) return undefined;
+  return {
+    apiVersion: 1,
+    source: typeof raw.source === "string" ? raw.source : DEFAULT_TIMER_SCRIPT,
+    initialState: isPlainObject(raw.initialState) ? raw.initialState : {},
+    state: isPlainObject(raw.state) ? raw.state : isPlainObject(raw.initialState) ? raw.initialState : {},
+  };
+}
+
+export function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
 export function parseTimerImport(content: string, schema: DpSchema | null) {
@@ -464,6 +519,18 @@ export function groupTimerTasks(tasks: TimerTask[]): Array<[string, TimerTask[]]
     groups.set(group, [...(groups.get(group) ?? []), task]);
   }
   return Array.from(groups.entries());
+}
+
+export function summarizeTimerGroup(tasks: TimerTask[], locale: string) {
+  const names = tasks.map((task) => task.name.trim()).filter(Boolean);
+  const shown = names.slice(0, 3).join(" · ");
+  const visible =
+    names.length > 3
+      ? locale.startsWith("en")
+        ? `${shown} and ${names.length} total`
+        : `${shown}等 ${names.length} 个`
+      : shown;
+  return { visible, full: names.join(" · ") };
 }
 
 export async function defaultTimerExportPath() {

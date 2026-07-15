@@ -10,6 +10,7 @@ import { LogPanel, type LogMode } from "./features/logs/LogPanel";
 import { RelatedCommandsModal } from "./features/settings/RelatedCommandsModal";
 import { createSettingsItems, RELATED_COMMANDS } from "./features/settings/settings-config";
 import { TimerReportModal } from "./features/timer/TimerReportModal";
+import { ScriptImportConfirmModal } from "./features/timer/ScriptImportConfirmModal";
 import { useTimerTasks } from "./features/timer/useTimerTasks";
 import { UpdateModal } from "./features/updater/UpdateModal";
 import { useAppUpdater } from "./features/updater/useAppUpdater";
@@ -73,11 +74,21 @@ export default function App() {
   const {
     timerTasks,
     collapsedGroups,
+    collapsedTasks,
     groupedTimerTasks,
     addTimerTask,
     patchTimerTask,
     duplicateTimerTask,
     toggleTimerGroup,
+    isTimerGroupCollapsed,
+    expandAllTimerGroups,
+    collapseAllTimerGroups,
+    toggleTimerTask,
+    isTimerTaskCollapsed,
+    expandAllTimerTasks,
+    collapseAllTimerTasks,
+    startTimerGroup,
+    pauseTimerGroup,
     exportTimerTasks,
     importTimerTasks,
     removeTimerTask,
@@ -88,6 +99,14 @@ export default function App() {
     startTimerTask,
     pauseTimerTask,
     runTimerTaskNow,
+    pendingTimerImport,
+    confirmTimerImport,
+    cancelTimerImport,
+    scriptPreviews,
+    setGenerationMode,
+    updateTimerScript,
+    resetTimerScriptState,
+    previewTimerScript,
   } = timer;
 
   useEffect(() => {
@@ -380,12 +399,22 @@ export default function App() {
         tasks={timerTasks}
         groupedTasks={groupedTimerTasks}
         collapsedGroups={collapsedGroups}
+        collapsedTasks={collapsedTasks}
         onClose={() => setTimerModalOpen(false)}
         onImport={() => runAction("importTimers", importTimerTasks)}
         onExport={() => runAction("exportTimers", exportTimerTasks)}
         onClear={clearTimerTasks}
         onAddTask={addTimerTask}
         onToggleGroup={toggleTimerGroup}
+        isGroupCollapsed={isTimerGroupCollapsed}
+        onExpandAllGroups={expandAllTimerGroups}
+        onCollapseAllGroups={collapseAllTimerGroups}
+        onToggleTask={toggleTimerTask}
+        isTaskCollapsed={isTimerTaskCollapsed}
+        onExpandAllTasks={expandAllTimerTasks}
+        onCollapseAllTasks={collapseAllTimerTasks}
+        onStartGroup={startTimerGroup}
+        onPauseGroup={pauseTimerGroup}
         onPatchTask={patchTimerTask}
         onStart={startTimerTask}
         onPause={pauseTimerTask}
@@ -395,6 +424,16 @@ export default function App() {
         onAddItem={addTimerItem}
         onUpdateItem={updateTimerItem}
         onRemoveItem={removeTimerItem}
+        scriptPreviews={scriptPreviews}
+        onGenerationModeChange={setGenerationMode}
+        onScriptChange={updateTimerScript}
+        onScriptPreview={previewTimerScript}
+        onScriptReset={resetTimerScriptState}
+      />
+      <ScriptImportConfirmModal
+        pending={pendingTimerImport}
+        onConfirm={confirmTimerImport}
+        onCancel={cancelTimerImport}
       />
       <UpdateModal
         open={updater.modalOpen}

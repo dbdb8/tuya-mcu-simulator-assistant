@@ -15,7 +15,81 @@
 - Wi-Fi reset、EZ/AP 配网和常用扩展指令。
 - 完整帧与 Raw 串口日志、协议语义解释和日志导出。
 - 中文和英文界面切换。
-- Windows、macOS 和 Ubuntu 构建及签名软件更新。
+- Windows、macOS、Linux 和 Ubuntu 安装包及签名软件更新。
+
+## 支持平台与安装
+
+请从项目的 [GitHub Releases](https://github.com/dbdb8/tuya-mcu-simulator-assistant/releases) 下载对应平台的最新安装包。建议优先选择最新稳定版本，不要混用不同版本的安装包和更新文件。
+
+| 平台          | 支持架构                 | 推荐安装包            | 说明                                       |
+| ------------- | ------------------------ | --------------------- | ------------------------------------------ |
+| Windows 10/11 | x64                      | `.exe` 或 `.msi`      | 普通用户优先使用 `.exe` 安装程序           |
+| macOS         | Intel x64、Apple Silicon | Universal `.dmg`      | 通用包同时支持 Intel 和 Apple 芯片         |
+| Linux         | x64                      | `.AppImage`           | 适合多数桌面 Linux 发行版，无需系统级安装  |
+| Ubuntu 22.04+ | x64                      | `.deb` 或 `.AppImage` | Ubuntu 推荐使用 `.deb`，便于系统管理和卸载 |
+
+### Windows
+
+1. 下载名称中包含 `x64-setup.exe` 的安装程序，或下载 `.msi` 安装包。
+2. 双击安装并按提示完成操作。
+3. 如果 Windows SmartScreen 显示“Windows 已保护你的电脑”，请先确认文件来自本项目官方 Release，再点击“更多信息 > 仍要运行”。
+4. 安装完成后，从开始菜单打开“Tuya MCU Simulator Assistant”。
+
+应用内更新支持 Windows 安装版。更新前应用会停止串口调试并释放 COM 口，然后完成安装和重启。
+
+### macOS
+
+1. 下载 Universal `.dmg` 文件并打开。
+2. 将 `Tuya MCU Simulator Assistant.app` 拖入 `/Applications`。
+3. 从“应用程序”目录启动应用。
+
+当前 macOS 安装包尚未使用 Apple Developer ID 签名和公证，部分系统会提示应用已损坏、无法验证开发者或直接阻止打开。请确认应用来自本项目的 GitHub Release，然后在“终端”执行：
+
+```bash
+xattr -dr com.apple.quarantine "/Applications/Tuya MCU Simulator Assistant.app"
+codesign --force --deep --sign - "/Applications/Tuya MCU Simulator Assistant.app"
+```
+
+第一条命令移除下载隔离属性，第二条命令为应用生成当前电脑使用的临时签名。仅对来源可信的官方 Release 文件执行这些命令，完成后重新打开应用。
+
+### Linux AppImage
+
+1. 下载 `.AppImage` 文件。
+2. 在终端进入下载目录并授予执行权限：
+
+```bash
+chmod +x "Tuya MCU Simulator Assistant"*.AppImage
+./"Tuya MCU Simulator Assistant"*.AppImage
+```
+
+AppImage 不需要安装，可以移动到任意固定目录后直接运行。使用 AppImage 启动时支持应用内更新；部分 Linux 发行版若提示缺少 FUSE，需要先安装该发行版对应的 FUSE 运行库。
+
+### Ubuntu DEB
+
+1. 下载 `.deb` 文件。
+2. 在下载目录执行：
+
+```bash
+sudo apt install ./tuya-mcu-simulator-assistant*.deb
+```
+
+安装后可从应用菜单启动。卸载命令：
+
+```bash
+sudo apt remove tuya-mcu-simulator-assistant
+```
+
+Ubuntu DEB 由系统包管理器维护，应用内只检查新版本并跳转到 GitHub Release，需要用户下载新的 `.deb` 后重新执行安装命令。
+
+### Linux 串口权限
+
+如果 Linux/Ubuntu 可以看到串口但打开时提示权限不足，将当前用户加入 `dialout` 组：
+
+```bash
+sudo usermod -aG dialout "$USER"
+```
+
+执行后注销并重新登录，再连接 USB-TTL。常见串口设备名称为 `/dev/ttyUSB0` 或 `/dev/ttyACM0`。
 
 ## 界面预览
 
@@ -63,17 +137,6 @@ cargo test --manifest-path src-tauri/Cargo.toml
 2. 打开应用，手动选择 Debugfile JSON。
 3. 选择串口和波特率，默认波特率为 `9600`。
 4. 点击“开始调试”，观察初始化、配网和 DP 交互日志。
-
-### macOS 无法打开应用
-
-当前 macOS 安装包尚未使用 Apple Developer ID 签名和公证，部分系统会提示应用已损坏、无法验证开发者或直接阻止打开。请确认应用来自本项目的 GitHub Release，将应用移动到 `/Applications` 后，在“终端”中执行：
-
-```bash
-xattr -dr com.apple.quarantine "/Applications/Tuya MCU Simulator Assistant.app"
-codesign --force --deep --sign - "/Applications/Tuya MCU Simulator Assistant.app"
-```
-
-第一条命令移除 macOS 下载隔离属性，第二条命令为应用生成本机临时签名。完成后重新打开应用。仅对从本项目官方 Release 下载并确认可信的应用执行这些命令。
 
 详细实现见[开发指南](docs/tuya-mcu-simulator-development-guide.md)，发布与自动更新见[发布指南](docs/software-update-release-guide.md)。
 

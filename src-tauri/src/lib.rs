@@ -1,6 +1,7 @@
 mod dp_schema;
 mod dp_simulator;
 mod language;
+mod mcu_ota;
 mod serial_runtime;
 mod timer_script;
 mod trigger_rules;
@@ -9,6 +10,9 @@ mod tuya_protocol;
 use dp_schema::DpSchema;
 use dp_simulator::{DpPatch, DpSimulator};
 use language::AppLanguage;
+use mcu_ota::{
+    FirmwareGenerateConfig, FirmwarePackageInfo, McuOtaConfig, McuOtaManager, McuOtaState,
+};
 use parking_lot::Mutex;
 use serde::Serialize;
 use serial_runtime::{AppError, NetworkStatus, SerialOutbound, SerialRuntime, SerialSettings};
@@ -23,8 +27,8 @@ use tauri::{
 use tauri::{Emitter, Manager};
 use timer_script::{TimerScriptRequest, TimerScriptResponse};
 use trigger_rules::{
-    collect_rule_errors, generate_run, DueTriggerRun, TriggerDownload, TriggerEngine, TriggerRule,
-    TriggerRuntimeState,
+    collect_rule_errors, generate_run, now_ms, DueTriggerRun, TriggerDownload, TriggerEngine,
+    TriggerRule, TriggerRuntimeState,
 };
 use tuya_protocol::{
     CMD_GET_GREEN_TIME, CMD_GET_LOCAL_TIME, CMD_GET_MAC, CMD_GET_WIFI_STATUS, CMD_HEARTBEAT_STOP,
@@ -40,6 +44,7 @@ struct AppState {
     network: Mutex<NetworkStatus>,
     language: Mutex<AppLanguage>,
     trigger_engine: Mutex<TriggerEngine>,
+    ota: Mutex<McuOtaManager>,
 }
 
 impl Default for AppState {
@@ -54,6 +59,7 @@ impl Default for AppState {
             network: Mutex::new(NetworkStatus::unknown(AppLanguage::default())),
             language: Mutex::new(AppLanguage::default()),
             trigger_engine: Mutex::new(TriggerEngine::default()),
+            ota: Mutex::new(McuOtaManager::default()),
         }
     }
 }
@@ -96,6 +102,7 @@ fn load_dp_file(
     *state.simulator.lock() = simulator;
     // Debugfile 切换后旧规则的 DP 定义可能失效，关闭总开关并清空所有待执行序列。
     state.trigger_engine.lock().set_master(false);
+    disable_ota_receiver(state.inner());
     // Debugfile 是当前设备配置的唯一来源，保存完整路径用于界面展示和排查。
     *state.dp_file_path.lock() = Some(display_path.clone());
     let sim = state.simulator.lock();
@@ -189,6 +196,14 @@ fn stop_serial_runtime(state: &Arc<AppState>) {
     }
     *state.manual_tx.lock() = None;
     state.trigger_engine.lock().clear_schedule();
+    disable_ota_receiver(state);
+}
+
+fn disable_ota_receiver(state: &Arc<AppState>) {
+    let mut ota = state.ota.lock();
+    let mut config = ota.snapshot(None, None).config;
+    config.enabled = false;
+    ota.configure(config);
 }
 
 fn emit_trigger_state(app: &tauri::AppHandle, state: &Arc<AppState>) {
@@ -511,6 +526,7 @@ fn set_dp_value(
     state: tauri::State<Arc<AppState>>,
 ) -> Result<(), AppError> {
     let language = *state.language.lock();
+    ensure_ota_allows_dp(&state, language)?;
     let schema = state.schema.lock().clone().ok_or_else(|| AppError {
         code: "dp_file_required".into(),
         title: language
@@ -543,6 +559,7 @@ fn report_dp_batch(
     state: tauri::State<Arc<AppState>>,
 ) -> Result<(), AppError> {
     let language = *state.language.lock();
+    ensure_ota_allows_dp(&state, language)?;
     let schema = state.schema.lock().clone().ok_or_else(|| AppError {
         code: "dp_file_required".into(),
         title: language
@@ -591,6 +608,196 @@ fn report_dp_batch(
     let sim = state.simulator.lock();
     let _ = app.emit("sim-state", sim.values_json());
     Ok(())
+}
+
+fn ensure_ota_allows_dp(state: &Arc<AppState>, language: AppLanguage) -> Result<(), AppError> {
+    if !state.ota.lock().is_busy() {
+        return Ok(());
+    }
+    Err(AppError {
+        code: "mcu_ota_busy".into(),
+        title: language
+            .text("MCU 固件升级进行中", "MCU firmware upgrade in progress")
+            .into(),
+        message: language
+            .text(
+                "升级接收或模拟重启期间已暂停 DP 上报。",
+                "DP reports are paused while firmware is being received or the simulated MCU is rebooting.",
+            )
+            .into(),
+        detail: "MCU OTA session blocks DP reports".into(),
+        suggestion: language
+            .text("请等待升级完成或取消当前升级。", "Wait for the upgrade to finish or cancel it.")
+            .into(),
+    })
+}
+
+fn ota_error(detail: String, language: AppLanguage) -> AppError {
+    AppError {
+        code: "mcu_ota_failed".into(),
+        title: language
+            .text("MCU 固件操作失败", "MCU firmware operation failed")
+            .into(),
+        message: language
+            .text(
+                "无法完成模拟固件生成、检查或升级操作。",
+                "The simulated firmware generation, inspection, or upgrade operation could not be completed.",
+            )
+            .into(),
+        detail,
+        suggestion: language
+            .text(
+                "请检查版本、PID、文件路径、磁盘空间和 OTA 配置。",
+                "Check the version, PID, file path, disk space, and OTA configuration.",
+            )
+            .into(),
+    }
+}
+
+fn ota_snapshot_for_state(state: &Arc<AppState>) -> McuOtaState {
+    let schema = state.schema.lock().clone();
+    state.ota.lock().snapshot(
+        schema.as_ref().map(|item| item.product_key.as_str()),
+        schema.as_ref().map(|item| item.mcu_version.as_str()),
+    )
+}
+
+#[tauri::command]
+fn generate_mcu_firmware_package(
+    config: FirmwareGenerateConfig,
+    state: tauri::State<Arc<AppState>>,
+) -> Result<FirmwarePackageInfo, AppError> {
+    mcu_ota::generate_package(&config).map_err(|detail| ota_error(detail, *state.language.lock()))
+}
+
+#[tauri::command]
+fn inspect_mcu_firmware_package(
+    path: String,
+    state: tauri::State<Arc<AppState>>,
+) -> Result<FirmwarePackageInfo, AppError> {
+    mcu_ota::inspect_package(Path::new(&path))
+        .map_err(|detail| ota_error(detail, *state.language.lock()))
+}
+
+#[tauri::command]
+fn configure_mcu_ota(
+    config: McuOtaConfig,
+    app: tauri::AppHandle,
+    state: tauri::State<Arc<AppState>>,
+) -> McuOtaState {
+    state.ota.lock().configure(config);
+    let snapshot = ota_snapshot_for_state(state.inner());
+    let _ = app.emit("mcu-ota-state", snapshot.clone());
+    snapshot
+}
+
+#[tauri::command]
+fn get_mcu_ota_state(state: tauri::State<Arc<AppState>>) -> McuOtaState {
+    ota_snapshot_for_state(state.inner())
+}
+
+#[tauri::command]
+fn cancel_mcu_ota(app: tauri::AppHandle, state: tauri::State<Arc<AppState>>) -> McuOtaState {
+    state.ota.lock().cancel();
+    let snapshot = ota_snapshot_for_state(state.inner());
+    let _ = app.emit("mcu-ota-state", snapshot.clone());
+    snapshot
+}
+
+#[tauri::command]
+fn simulate_mcu_ota_power_loss(
+    app: tauri::AppHandle,
+    state: tauri::State<Arc<AppState>>,
+) -> McuOtaState {
+    state.ota.lock().simulate_power_loss();
+    let snapshot = ota_snapshot_for_state(state.inner());
+    let _ = app.emit("mcu-ota-state", snapshot.clone());
+    snapshot
+}
+
+#[tauri::command]
+fn clear_mcu_ota_session(app: tauri::AppHandle, state: tauri::State<Arc<AppState>>) -> McuOtaState {
+    state.ota.lock().clear();
+    let snapshot = ota_snapshot_for_state(state.inner());
+    let _ = app.emit("mcu-ota-state", snapshot.clone());
+    snapshot
+}
+
+#[tauri::command]
+fn export_received_firmware(
+    path: String,
+    state: tauri::State<Arc<AppState>>,
+) -> Result<(), AppError> {
+    state
+        .ota
+        .lock()
+        .export_received(Path::new(&path))
+        .map_err(|detail| ota_error(detail, *state.language.lock()))
+}
+
+#[tauri::command]
+fn restore_debugfile_mcu_version(
+    app: tauri::AppHandle,
+    state: tauri::State<Arc<AppState>>,
+) -> Result<McuOtaState, AppError> {
+    let schema = state
+        .schema
+        .lock()
+        .clone()
+        .ok_or_else(|| ota_error("Debugfile is not loaded".into(), *state.language.lock()))?;
+    state
+        .ota
+        .lock()
+        .restore_debugfile_version(&schema.product_key, &schema.mcu_version, now_ms())
+        .map_err(|detail| ota_error(detail, *state.language.lock()))?;
+    state.trigger_engine.lock().clear_schedule();
+    let snapshot = ota_snapshot_for_state(state.inner());
+    let _ = app.emit("mcu-ota-state", snapshot.clone());
+    complete_version_reboot_without_serial(&app, state.inner());
+    Ok(snapshot)
+}
+
+#[tauri::command]
+fn set_mcu_firmware_version(
+    version: String,
+    app: tauri::AppHandle,
+    state: tauri::State<Arc<AppState>>,
+) -> Result<McuOtaState, AppError> {
+    let product_key = state
+        .schema
+        .lock()
+        .as_ref()
+        .map(|schema| schema.product_key.clone())
+        .ok_or_else(|| ota_error("Debugfile is not loaded".into(), *state.language.lock()))?;
+    state
+        .ota
+        .lock()
+        .set_manual_version(&product_key, &version, now_ms())
+        .map_err(|detail| ota_error(detail, *state.language.lock()))?;
+    state.trigger_engine.lock().clear_schedule();
+    let snapshot = ota_snapshot_for_state(state.inner());
+    let _ = app.emit("mcu-ota-state", snapshot.clone());
+    complete_version_reboot_without_serial(&app, state.inner());
+    Ok(snapshot)
+}
+
+fn complete_version_reboot_without_serial(app: &tauri::AppHandle, state: &Arc<AppState>) {
+    let app = app.clone();
+    let state = state.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_secs(1));
+        // 串口在线时由串口线程负责心跳和延迟产品信息；仅在串口已关闭时接管版本提交。
+        if state.serial.lock().is_some() {
+            return;
+        }
+        let tick = { state.ota.lock().tick(now_ms()) };
+        if let Ok(tick) = tick {
+            if let Some(version) = tick.version_changed {
+                let _ = app.emit("mcu-firmware-version-changed", version);
+                let _ = app.emit("mcu-ota-state", ota_snapshot_for_state(&state));
+            }
+        }
+    });
 }
 
 #[tauri::command]
@@ -710,6 +917,13 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .manage(state)
         .setup(|app| {
+            let app_data_dir = app.path().app_data_dir()?;
+            let cache_dir = app.path().app_cache_dir()?.join("mcu-ota");
+            app.state::<Arc<AppState>>()
+                .ota
+                .lock()
+                .initialize(app_data_dir, cache_dir)
+                .map_err(std::io::Error::other)?;
             // Windows 标题栏左上角图标不总是跟随 bundle.icon，启动时显式设置窗口图标，避免开发模式继续显示旧缓存。
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.set_icon(tauri::include_image!("icons/128x128.png"));
@@ -775,6 +989,16 @@ pub fn run() {
             save_log_file,
             load_text_file,
             get_update_environment,
+            generate_mcu_firmware_package,
+            inspect_mcu_firmware_package,
+            configure_mcu_ota,
+            get_mcu_ota_state,
+            cancel_mcu_ota,
+            simulate_mcu_ota_power_loss,
+            export_received_firmware,
+            clear_mcu_ota_session,
+            restore_debugfile_mcu_version,
+            set_mcu_firmware_version,
             set_app_language,
             hide_main_window,
             exit_application

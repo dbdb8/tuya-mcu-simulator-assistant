@@ -16,6 +16,8 @@ import { TriggerReportModal } from "./features/trigger/TriggerReportModal";
 import { useTriggerRules } from "./features/trigger/useTriggerRules";
 import { UpdateModal } from "./features/updater/UpdateModal";
 import { useAppUpdater } from "./features/updater/useAppUpdater";
+import { McuOtaModal } from "./features/ota/McuOtaModal";
+import { useMcuOta } from "./features/ota/useMcuOta";
 import { useTranslation } from "react-i18next";
 import i18n, { changeAppLanguage, type AppLocale } from "./i18n";
 import { LanguageSettingsModal } from "./features/settings/LanguageSettingsModal";
@@ -57,6 +59,7 @@ export default function App() {
   const [relatedModalOpen, setRelatedModalOpen] = useState(false);
   const [timerModalOpen, setTimerModalOpen] = useState(false);
   const [triggerModalOpen, setTriggerModalOpen] = useState(false);
+  const [mcuOtaModalOpen, setMcuOtaModalOpen] = useState(false);
   const [languageModalOpen, setLanguageModalOpen] = useState(false);
   const [closeBehaviorModalOpen, setCloseBehaviorModalOpen] = useState(false);
   const [closePromptOpen, setClosePromptOpen] = useState(false);
@@ -68,6 +71,10 @@ export default function App() {
   const restoredOnce = useRef(false);
   const timer = useTimerTasks({ schema, serialOpen, network, showError, setStatus });
   const trigger = useTriggerRules({ schema, serialOpen, showError, setStatus });
+  const ota = useMcuOta(() => {
+    // OTA 接收阶段禁止业务 DP，上层同步暂停定时任务以保留各任务执行位置。
+    timer.pauseAllTimerTasks(i18n.t("mcuOta.timerPaused"));
+  });
   const updater = useAppUpdater({
     serialOpen,
     beforeInstall: async () => {
@@ -342,6 +349,11 @@ export default function App() {
     },
     () => {
       setSettingsOpen(false);
+      void ota.refresh();
+      setMcuOtaModalOpen(true);
+    },
+    () => {
+      setSettingsOpen(false);
       setLanguageModalOpen(true);
     },
     {
@@ -464,6 +476,13 @@ export default function App() {
         onScriptChange={trigger.updateScript}
         onScriptReset={trigger.resetScript}
         onPreview={(id, value) => void trigger.previewRule(id, value)}
+      />
+      <McuOtaModal
+        open={mcuOtaModalOpen}
+        schema={schema}
+        serialOpen={serialOpen}
+        ota={ota}
+        onClose={() => setMcuOtaModalOpen(false)}
       />
       <ScriptImportConfirmModal
         pending={pendingTimerImport}

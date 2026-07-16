@@ -17,6 +17,7 @@ export function createSettingsItems(
   onRelatedCommands: () => void,
   onTimedReports: () => void,
   onTriggerReports: () => void,
+  onMcuOta: () => void,
   onLanguage: () => void,
   closeBehavior: { visible: boolean; onOpen: () => void },
   updater: { onOpen: () => void; hasUpdate: boolean; version?: string; checking: boolean; failed: boolean },
@@ -40,6 +41,12 @@ export function createSettingsItems(
       label: i18n.t("settings.trigger"),
       description: i18n.t("settings.triggerDesc"),
       onClick: onTriggerReports,
+    },
+    {
+      key: "mcuOta",
+      label: i18n.t("settings.mcuOta"),
+      description: i18n.t("settings.mcuOtaDesc"),
+      onClick: onMcuOta,
     },
     {
       key: "language",

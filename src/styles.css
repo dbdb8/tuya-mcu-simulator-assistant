@@ -1297,6 +1297,164 @@ label span {
   padding: 0 20px 20px;
 }
 
+.mcu-ota-modal {
+  width: min(920px, 100%);
+}
+.ota-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 10px 16px 0;
+  border-bottom: 1px solid #263546;
+}
+.ota-tabs button {
+  border-color: transparent;
+  border-radius: 6px 6px 0 0;
+}
+.ota-tabs button.active {
+  color: #dbeafe;
+  border-color: #36536d;
+  border-bottom-color: #151d26;
+  background: #1d2b39;
+}
+.ota-body {
+  min-height: 360px;
+  overflow: auto;
+  padding: 16px 18px 0;
+}
+.ota-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.ota-grid label {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+.ota-grid input,
+.ota-grid select,
+.ota-file-row input {
+  width: 100%;
+  min-width: 0;
+}
+.ota-file-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+.ota-check,
+.ota-checks label {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+.ota-check {
+  margin-top: 12px;
+}
+.ota-checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 12px;
+}
+.ota-master {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px;
+  border: 1px solid #36536d;
+  border-radius: 6px;
+  background: #101820;
+}
+.ota-master div {
+  display: grid;
+  gap: 4px;
+}
+
+.ota-version-manager {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 12px;
+  padding: 12px;
+  border: 1px solid #36536d;
+  border-radius: 6px;
+  background: #101820;
+}
+
+.ota-version-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.ota-version-summary div,
+.ota-version-editor label {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.ota-version-summary b {
+  overflow-wrap: anywhere;
+}
+
+.ota-version-editor {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) auto;
+  gap: 8px;
+  align-items: end;
+}
+
+.ota-version-manager > small {
+  color: #92a3b6;
+}
+.ota-master small,
+.ota-progress small,
+.ota-result small {
+  color: #92a3b6;
+}
+.ota-progress {
+  display: grid;
+  gap: 7px;
+  margin: 12px 0;
+  padding: 12px;
+  border: 1px solid #2d4257;
+  border-radius: 6px;
+}
+.ota-progress > div {
+  display: flex;
+  justify-content: space-between;
+}
+.ota-progress progress {
+  width: 100%;
+}
+.ota-result,
+.ota-error,
+.ota-path {
+  display: grid;
+  gap: 6px;
+  margin-top: 12px;
+  padding: 10px;
+  border: 1px solid #36536d;
+  border-radius: 6px;
+  overflow: auto;
+}
+.ota-result.success {
+  border-color: #237a57;
+}
+.ota-result.error,
+.ota-error {
+  border-color: #9f3a45;
+  color: #fecaca;
+}
+.ota-result code,
+.ota-error code,
+.ota-path code {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
 .language-modal {
   width: min(460px, calc(100vw - 32px));
 }
@@ -1395,6 +1553,14 @@ label span {
 }
 
 @media (max-width: 600px) {
+  .ota-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .ota-version-summary,
+  .ota-version-editor {
+    grid-template-columns: 1fr;
+  }
   .modal-backdrop {
     padding: 12px;
   }

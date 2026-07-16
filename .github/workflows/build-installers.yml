@@ -10,6 +10,54 @@ permissions:
   contents: write
 
 jobs:
+  verify:
+    name: Verify release
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Ubuntu Tauri dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            pkg-config \
+            libudev-dev \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy,rustfmt
+
+      - name: Cache Rust verification build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+          shared-key: verify-ubuntu
+          cache-on-failure: true
+
+      - name: Verify release version
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: npm run version:check
+
+      - name: Check Rust formatting
+        run: cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
+
+      - name: Run Rust Clippy
+        run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+
+      - name: Run Rust tests
+        run: cargo test --manifest-path src-tauri/Cargo.toml
+
   build:
     name: Build ${{ matrix.label }}
     runs-on: ${{ matrix.os }}
@@ -63,6 +111,8 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri -> target
+          shared-key: release-${{ matrix.label }}
+          cache-on-failure: true
 
       - name: Install frontend dependencies
         run: npm ci
@@ -71,9 +121,6 @@ jobs:
         env:
           RELEASE_TAG: ${{ github.ref_name }}
         run: npm run version:check
-
-      - name: Run Rust tests
-        run: cargo test --manifest-path src-tauri/Cargo.toml
 
       - name: Build Tauri installer
         if: "!startsWith(matrix.os, 'macos')"
@@ -100,11 +147,13 @@ jobs:
             src-tauri/target/release/bundle
             src-tauri/target/universal-apple-darwin/release/bundle
           if-no-files-found: error
+          compression-level: 0
+          retention-days: 3
 
   release:
     name: Publish GitHub Release
     if: startsWith(github.ref, 'refs/tags/')
-    needs: build
+    needs: [verify, build]
     runs-on: ubuntu-22.04
     steps:
       - name: Checkout

@@ -1,7 +1,7 @@
 {
   "name": "tuya-mcu-simulator-assistant",
   "private": true,
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "Cross-platform assistant for simulating a Tuya-compatible MCU over serial.",
   "license": "MIT",
   "repository": {

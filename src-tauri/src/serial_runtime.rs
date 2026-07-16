@@ -2,12 +2,14 @@ use crate::dp_schema::{DpKind, DpSchema};
 use crate::dp_simulator::{decode_value, encode_report_with_enum, reports_from_patches, DpReport};
 use crate::emit_state;
 use crate::language::AppLanguage;
+use crate::mcu_ota::OtaFrameResult;
 use crate::trigger_rules::{generate_run, now_ms, DueTriggerRun, TriggerDownload};
 use crate::tuya_protocol::{
     build_frame, hex, FrameParser, CMD_DP_DOWNLOAD, CMD_DP_REPORT, CMD_GET_GREEN_TIME,
     CMD_GET_LOCAL_TIME, CMD_GET_MAC, CMD_GET_WIFI_STATUS, CMD_HEARTBEAT, CMD_HEARTBEAT_STOP,
-    CMD_NEW_FUNCTION_NOTICE, CMD_PRODUCT_INFO, CMD_QUERY_ALL_DP, CMD_QUERY_MEMORY,
-    CMD_QUERY_SIGNAL_STRENGTH, CMD_WIFI_RESET, CMD_WIFI_SELECT_MODE, CMD_WIFI_STATE, CMD_WORK_MODE,
+    CMD_MCU_OTA_DATA, CMD_MCU_OTA_START, CMD_NEW_FUNCTION_NOTICE, CMD_PRODUCT_INFO,
+    CMD_QUERY_ALL_DP, CMD_QUERY_MEMORY, CMD_QUERY_SIGNAL_STRENGTH, CMD_WIFI_RESET,
+    CMD_WIFI_SELECT_MODE, CMD_WIFI_STATE, CMD_WORK_MODE,
 };
 use crate::AppState;
 use anyhow::{anyhow, Result};
@@ -305,8 +307,40 @@ fn run_loop(
             )?;
         }
 
+        // 模拟重启由串口线程推进，保证版本落盘、首次心跳和延迟产品信息回复处于同一时序。
+        let ota_tick = state
+            .ota
+            .lock()
+            .tick(now_ms())
+            .map_err(|detail| anyhow!(detail))?;
+        if ota_tick.reset_heartbeat {
+            heartbeat_seen = false;
+        }
+        if let Some(version) = ota_tick.version_changed {
+            let _ = app.emit("mcu-firmware-version-changed", version);
+            let _ = app.emit("mcu-ota-state", ota_snapshot(&state, &schema));
+        }
+        if ota_tick.reply_product_info {
+            let version = state
+                .ota
+                .lock()
+                .effective_version(&schema.product_key, &schema.mcu_version);
+            let payload = product_info_payload(&schema, &version, None);
+            let frame = build_frame(CMD_PRODUCT_INFO, payload.as_bytes());
+            write_frame(
+                &mut port,
+                &app,
+                &schema,
+                sdk_tx_title(Some(CMD_PRODUCT_INFO), *state.language.lock()),
+                &frame,
+                *state.language.lock(),
+            )?;
+        }
+
         // 触发序列由串口线程统一调度，确保不同规则和普通手动发送最终都串行写入同一个端口。
-        process_due_trigger_runs(&mut port, &app, &schema, &state)?;
+        if !state.ota.lock().is_busy() {
+            process_due_trigger_runs(&mut port, &app, &schema, &state)?;
+        }
     }
 
     let _ = app.emit("serial-opened", false);
@@ -330,7 +364,14 @@ fn handle_frame(
             vec![build_frame(CMD_HEARTBEAT, &[value])]
         }
         CMD_PRODUCT_INFO => {
-            let info = product_info_payload(schema, reset_pairing_session.then_some(0));
+            if state.ota.lock().defer_product_query_if_rebooting() {
+                return Vec::new();
+            }
+            let version = state
+                .ota
+                .lock()
+                .effective_version(&schema.product_key, &schema.mcu_version);
+            let info = product_info_payload(schema, &version, reset_pairing_session.then_some(0));
             if *reset_pairing_session {
                 let language = *state.language.lock();
                 emit_log(
@@ -372,15 +413,23 @@ fn handle_frame(
             Vec::new()
         }
         CMD_QUERY_ALL_DP => {
+            if state.ota.lock().is_busy() {
+                return Vec::new();
+            }
             let reports = state.simulator.lock().all_reports(schema);
             split_report_frames(reports)
         }
         CMD_DP_DOWNLOAD => {
+            if state.ota.lock().is_busy() {
+                return Vec::new();
+            }
             let reports = handle_dp_download(schema, state, payload, app);
             // DP 下发后立即把后端保存后的最终状态推送到页面，避免 UI 只显示旧值或乐观值。
             emit_state(app, state);
             split_report_frames(reports)
         }
+        CMD_MCU_OTA_START => handle_ota_start(schema, state, payload, app),
+        CMD_MCU_OTA_DATA => handle_ota_data(schema, state, payload, app),
         CMD_QUERY_MEMORY
         | CMD_GET_GREEN_TIME
         | CMD_QUERY_SIGNAL_STRENGTH
@@ -614,14 +663,89 @@ fn combine_reports(reports: Vec<DpReport>) -> Vec<u8> {
         .collect()
 }
 
-fn product_info_payload(schema: &DpSchema, config_mode_override: Option<u8>) -> String {
+fn product_info_payload(
+    schema: &DpSchema,
+    firmware_version: &str,
+    config_mode_override: Option<u8>,
+) -> String {
     // 产品信息来自用户手动加载的 Debugfile；Wi-Fi reset 后的配网握手按附件临时使用 m=0。
     serde_json::json!({
         "p": schema.product_key,
-        "v": schema.mcu_version,
+        "v": firmware_version,
         "m": config_mode_override.unwrap_or(schema.config_mode)
     })
     .to_string()
+}
+
+fn ota_snapshot(state: &Arc<AppState>, schema: &DpSchema) -> crate::mcu_ota::McuOtaState {
+    state
+        .ota
+        .lock()
+        .snapshot(Some(&schema.product_key), Some(&schema.mcu_version))
+}
+
+fn handle_ota_start(
+    schema: &DpSchema,
+    state: &Arc<AppState>,
+    payload: &[u8],
+    app: &AppHandle,
+) -> Vec<Vec<u8>> {
+    if payload.len() != 4 {
+        return Vec::new();
+    }
+    let firmware_size = u32::from_be_bytes(payload.try_into().unwrap()) as u64;
+    let current_version = state
+        .ota
+        .lock()
+        .effective_version(&schema.product_key, &schema.mcu_version);
+    let battery = {
+        let code = state.ota.lock().battery_dp_code();
+        code.and_then(|code| {
+            state
+                .simulator
+                .lock()
+                .values_json()
+                .get(&code)
+                .and_then(serde_json::Value::as_i64)
+        })
+    };
+    let result = state.ota.lock().start(
+        firmware_size,
+        &schema.product_key,
+        &current_version,
+        now_ms(),
+        battery,
+    );
+    // OTA 接收一旦被接受，清空旧触发序列，避免升级窗口内继续产生业务 DP 帧。
+    if matches!(result, Ok(OtaFrameResult::Ack(_))) {
+        state.trigger_engine.lock().clear_schedule();
+    }
+    let _ = app.emit("mcu-ota-state", ota_snapshot(state, schema));
+    match result {
+        Ok(OtaFrameResult::Ack(data)) => vec![build_frame(CMD_MCU_OTA_START, &data)],
+        Ok(OtaFrameResult::NoAck) | Err(_) => Vec::new(),
+    }
+}
+
+fn handle_ota_data(
+    schema: &DpSchema,
+    state: &Arc<AppState>,
+    payload: &[u8],
+    app: &AppHandle,
+) -> Vec<Vec<u8>> {
+    let current_version = state
+        .ota
+        .lock()
+        .effective_version(&schema.product_key, &schema.mcu_version);
+    let result = state
+        .ota
+        .lock()
+        .receive_packet(payload, &current_version, now_ms());
+    let _ = app.emit("mcu-ota-state", ota_snapshot(state, schema));
+    match result {
+        Ok(OtaFrameResult::Ack(data)) => vec![build_frame(CMD_MCU_OTA_DATA, &data)],
+        Ok(OtaFrameResult::NoAck) | Err(_) => Vec::new(),
+    }
 }
 
 fn split_report_frames(reports: Vec<DpReport>) -> Vec<Vec<u8>> {
@@ -675,6 +799,8 @@ fn sdk_rx_title(command: u8, language: AppLanguage) -> &'static str {
         (CMD_WIFI_RESET, AppLanguage::EnUs) => "SDK RX: Wi-Fi reset response",
         (CMD_WIFI_SELECT_MODE, AppLanguage::EnUs) => "SDK RX: Wi-Fi mode response",
         (CMD_DP_DOWNLOAD, AppLanguage::EnUs) => "SDK RX: DP download",
+        (CMD_MCU_OTA_START, AppLanguage::EnUs) => "SDK RX: MCU OTA start",
+        (CMD_MCU_OTA_DATA, AppLanguage::EnUs) => "SDK RX: MCU OTA data",
         (CMD_QUERY_ALL_DP, AppLanguage::EnUs) => "SDK RX: All DP query",
         (CMD_QUERY_MEMORY, AppLanguage::EnUs) => "SDK RX: Memory query response",
         (CMD_GET_GREEN_TIME, AppLanguage::EnUs) => "SDK RX: UTC time response",
@@ -693,6 +819,8 @@ fn sdk_rx_title(command: u8, language: AppLanguage) -> &'static str {
             CMD_WIFI_RESET => "SDK RX: Wi-Fi reset 回复",
             CMD_WIFI_SELECT_MODE => "SDK RX: Wi-Fi mode 回复",
             CMD_DP_DOWNLOAD => "SDK RX: DP 下发",
+            CMD_MCU_OTA_START => "SDK RX: MCU OTA 开始",
+            CMD_MCU_OTA_DATA => "SDK RX: MCU OTA 数据",
             CMD_QUERY_ALL_DP => "SDK RX: 全量状态查询",
             CMD_QUERY_MEMORY => "SDK RX: 查询内存回复",
             CMD_GET_GREEN_TIME => "SDK RX: 格林时间回复",
@@ -715,6 +843,8 @@ fn sdk_tx_title(command: Option<u8>, language: AppLanguage) -> &'static str {
             Some(CMD_WORK_MODE) => "SDK TX: Work mode response",
             Some(CMD_WIFI_STATE) => "SDK TX: Network status ACK",
             Some(CMD_DP_REPORT) => "SDK TX: DP status report",
+            Some(CMD_MCU_OTA_START) => "SDK TX: MCU OTA start ACK",
+            Some(CMD_MCU_OTA_DATA) => "SDK TX: MCU OTA data ACK",
             Some(CMD_WIFI_RESET) => "SDK TX: Wi-Fi reset",
             Some(CMD_WIFI_SELECT_MODE) => "SDK TX: Wi-Fi mode",
             Some(CMD_QUERY_MEMORY) => "SDK TX: Query memory",
@@ -734,6 +864,8 @@ fn sdk_tx_title(command: Option<u8>, language: AppLanguage) -> &'static str {
         Some(CMD_WORK_MODE) => "SDK TX: 工作模式回复",
         Some(CMD_WIFI_STATE) => "SDK TX: 联网状态 ACK",
         Some(CMD_DP_REPORT) => "SDK TX: DP 状态上报",
+        Some(CMD_MCU_OTA_START) => "SDK TX: MCU OTA 开始 ACK",
+        Some(CMD_MCU_OTA_DATA) => "SDK TX: MCU OTA 数据 ACK",
         Some(CMD_WIFI_RESET) => "SDK TX: Wi-Fi reset",
         Some(CMD_WIFI_SELECT_MODE) => "SDK TX: Wi-Fi mode",
         Some(CMD_QUERY_MEMORY) => "SDK TX: 查询内存",
@@ -1605,7 +1737,7 @@ mod wifi_flow_tests {
             config_mode_label: "默认配网".into(),
             points: vec![],
         };
-        let payload = product_info_payload(&schema, None);
+        let payload = product_info_payload(&schema, &schema.mcu_version, None);
         assert!(payload.contains("\"p\":\"pid123\""));
         assert!(payload.contains("\"v\":\"1.0.0\""));
         assert!(payload.contains("\"m\":0"));
@@ -1723,7 +1855,7 @@ mod wifi_flow_tests {
             config_mode_label: "test".into(),
             points: vec![],
         };
-        let payload = product_info_payload(&schema, Some(0));
+        let payload = product_info_payload(&schema, &schema.mcu_version, Some(0));
         assert!(payload.contains("\"p\":\"pid123\""));
         assert!(payload.contains("\"m\":0"));
     }

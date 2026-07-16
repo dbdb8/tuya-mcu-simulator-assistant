@@ -15,11 +15,12 @@ use serial_runtime::{AppError, NetworkStatus, SerialOutbound, SerialRuntime, Ser
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+#[cfg(target_os = "windows")]
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    Emitter, Manager,
 };
+use tauri::{Emitter, Manager};
 use timer_script::{TimerScriptRequest, TimerScriptResponse};
 use trigger_rules::{
     collect_rule_errors, generate_run, DueTriggerRun, TriggerDownload, TriggerEngine, TriggerRule,
@@ -397,6 +398,7 @@ fn exit_application(app: tauri::AppHandle, state: tauri::State<Arc<AppState>>) {
     app.exit(0);
 }
 
+#[cfg(target_os = "windows")]
 fn show_main_window(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.unminimize();

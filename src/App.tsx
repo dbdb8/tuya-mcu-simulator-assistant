@@ -12,6 +12,8 @@ import { createSettingsItems, RELATED_COMMANDS } from "./features/settings/setti
 import { TimerReportModal } from "./features/timer/TimerReportModal";
 import { ScriptImportConfirmModal } from "./features/timer/ScriptImportConfirmModal";
 import { useTimerTasks } from "./features/timer/useTimerTasks";
+import { TriggerReportModal } from "./features/trigger/TriggerReportModal";
+import { useTriggerRules } from "./features/trigger/useTriggerRules";
 import { UpdateModal } from "./features/updater/UpdateModal";
 import { useAppUpdater } from "./features/updater/useAppUpdater";
 import { useTranslation } from "react-i18next";
@@ -54,6 +56,7 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [relatedModalOpen, setRelatedModalOpen] = useState(false);
   const [timerModalOpen, setTimerModalOpen] = useState(false);
+  const [triggerModalOpen, setTriggerModalOpen] = useState(false);
   const [languageModalOpen, setLanguageModalOpen] = useState(false);
   const [closeBehaviorModalOpen, setCloseBehaviorModalOpen] = useState(false);
   const [closePromptOpen, setClosePromptOpen] = useState(false);
@@ -64,6 +67,7 @@ export default function App() {
   const [language, setLanguage] = useState<AppLocale>(() => (i18n.language === "en-US" ? "en-US" : "zh-CN"));
   const restoredOnce = useRef(false);
   const timer = useTimerTasks({ schema, serialOpen, network, showError, setStatus });
+  const trigger = useTriggerRules({ schema, serialOpen, showError, setStatus });
   const updater = useAppUpdater({
     serialOpen,
     beforeInstall: async () => {
@@ -334,6 +338,10 @@ export default function App() {
     },
     () => {
       setSettingsOpen(false);
+      setTriggerModalOpen(true);
+    },
+    () => {
+      setSettingsOpen(false);
       setLanguageModalOpen(true);
     },
     {
@@ -429,6 +437,33 @@ export default function App() {
         onScriptChange={updateTimerScript}
         onScriptPreview={previewTimerScript}
         onScriptReset={resetTimerScriptState}
+      />
+      <TriggerReportModal
+        open={triggerModalOpen}
+        schema={schema}
+        serialOpen={serialOpen}
+        rules={trigger.rules}
+        masterEnabled={trigger.masterEnabled}
+        runtime={trigger.runtime}
+        previews={trigger.previews}
+        onClose={() => setTriggerModalOpen(false)}
+        onMasterChange={(enabled) => void trigger.setMasterEnabled(enabled)}
+        onImport={() => runAction("importTriggers", trigger.importRules)}
+        onExport={() => runAction("exportTriggers", trigger.exportRules)}
+        onClear={trigger.clearRules}
+        onAdd={trigger.addRule}
+        onPatch={trigger.patchRule}
+        onRuleEnabled={trigger.setRuleEnabled}
+        onGroupEnabled={trigger.setGroupRulesEnabled}
+        onDuplicate={trigger.duplicateRule}
+        onRemove={trigger.removeRule}
+        onAddItem={trigger.addItem}
+        onUpdateItem={trigger.updateItem}
+        onRemoveItem={trigger.removeItem}
+        onGenerationModeChange={trigger.setGenerationMode}
+        onScriptChange={trigger.updateScript}
+        onScriptReset={trigger.resetScript}
+        onPreview={(id, value) => void trigger.previewRule(id, value)}
       />
       <ScriptImportConfirmModal
         pending={pendingTimerImport}

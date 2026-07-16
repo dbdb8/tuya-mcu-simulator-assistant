@@ -12,6 +12,8 @@ type TimerContext = {
   state: Record<string, JsonValue>; values: Record<string, JsonValue>;
   schema: { product_key: string; points: Array<{ id: number; code: string; kind: string; property: Record<string, JsonValue> }> };
   network: { code: number; label: string }; task: { id: string; name: string; runCount: number }; preview: boolean;
+  trigger: null | { id: number; code: string; value: JsonValue; receivedAtMs: number; frameIndex: number };
+  sequence: null | { id: string; group: string; runIndex: number; startedAtMs: number; elapsedMs: number; previousRunAtMs: number | null; isFirstRun: boolean };
 };
 declare function randomInt(min: number, max: number): number;
 declare function randomChoice<T>(values: T[]): T;
@@ -24,7 +26,7 @@ declare function bytesToHex(bytes: number[]): string;
 declare function raw(bytes: number[]): { $raw: number[] };
 declare function json(value: JsonValue): { $json: JsonValue };
 declare function generate(ctx: TimerContext): {
-  reports: DpReport[]; state: Record<string, JsonValue>; summary?: string; skip?: boolean;
+  reports: DpReport[]; state: Record<string, JsonValue>; summary?: string; skip?: boolean; complete?: boolean;
 };
 `;
 

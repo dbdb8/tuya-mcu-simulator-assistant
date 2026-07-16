@@ -155,6 +155,26 @@ pub fn encode_report_with_enum(report: &DpReport) -> Vec<u8> {
     payload
 }
 
+pub fn reports_from_patches(
+    patches: &[DpPatch],
+    schema: &DpSchema,
+) -> Result<Vec<DpReport>, String> {
+    patches
+        .iter()
+        .map(|patch| {
+            let point = schema
+                .by_code(&patch.code)
+                .ok_or_else(|| format!("unknown DP code: {}", patch.code))?;
+            Ok(DpReport {
+                id: point.id,
+                kind: point.kind.clone(),
+                value: patch.value.clone(),
+                enum_range: enum_range(point),
+            })
+        })
+        .collect()
+}
+
 pub fn decode_value(kind: &DpKind, payload: &[u8]) -> Value {
     match kind {
         DpKind::Bool => json!(payload.first().copied().unwrap_or(0) != 0),

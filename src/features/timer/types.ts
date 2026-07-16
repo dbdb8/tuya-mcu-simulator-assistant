@@ -43,6 +43,7 @@ export type TimerScriptResponse = {
   state: Record<string, unknown>;
   summary?: string;
   skip: boolean;
+  complete: boolean;
 };
 
 export type PendingTimerImport = {

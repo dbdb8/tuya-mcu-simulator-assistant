@@ -3,6 +3,7 @@ mod dp_simulator;
 mod language;
 mod serial_runtime;
 mod timer_script;
+mod trigger_rules;
 mod tuya_protocol;
 
 use dp_schema::DpSchema;
@@ -20,6 +21,10 @@ use tauri::{
     Emitter, Manager,
 };
 use timer_script::{TimerScriptRequest, TimerScriptResponse};
+use trigger_rules::{
+    collect_rule_errors, generate_run, DueTriggerRun, TriggerDownload, TriggerEngine, TriggerRule,
+    TriggerRuntimeState,
+};
 use tuya_protocol::{
     CMD_GET_GREEN_TIME, CMD_GET_LOCAL_TIME, CMD_GET_MAC, CMD_GET_WIFI_STATUS, CMD_HEARTBEAT_STOP,
     CMD_NEW_FUNCTION_NOTICE, CMD_QUERY_MEMORY, CMD_QUERY_SIGNAL_STRENGTH,
@@ -33,6 +38,7 @@ struct AppState {
     manual_tx: Mutex<Option<std::sync::mpsc::Sender<SerialOutbound>>>,
     network: Mutex<NetworkStatus>,
     language: Mutex<AppLanguage>,
+    trigger_engine: Mutex<TriggerEngine>,
 }
 
 impl Default for AppState {
@@ -46,6 +52,7 @@ impl Default for AppState {
             manual_tx: Mutex::new(None),
             network: Mutex::new(NetworkStatus::unknown(AppLanguage::default())),
             language: Mutex::new(AppLanguage::default()),
+            trigger_engine: Mutex::new(TriggerEngine::default()),
         }
     }
 }
@@ -86,6 +93,8 @@ fn load_dp_file(
     let simulator = DpSimulator::with_schema(&schema);
     *state.schema.lock() = Some(schema.clone());
     *state.simulator.lock() = simulator;
+    // Debugfile 切换后旧规则的 DP 定义可能失效，关闭总开关并清空所有待执行序列。
+    state.trigger_engine.lock().set_master(false);
     // Debugfile 是当前设备配置的唯一来源，保存完整路径用于界面展示和排查。
     *state.dp_file_path.lock() = Some(display_path.clone());
     let sim = state.simulator.lock();
@@ -178,6 +187,199 @@ fn stop_serial_runtime(state: &Arc<AppState>) {
         runtime.stop();
     }
     *state.manual_tx.lock() = None;
+    state.trigger_engine.lock().clear_schedule();
+}
+
+fn emit_trigger_state(app: &tauri::AppHandle, state: &Arc<AppState>) {
+    let _ = app.emit("trigger-rule-state", state.trigger_engine.lock().state());
+}
+
+#[tauri::command]
+fn set_trigger_rules(
+    rules: Vec<TriggerRule>,
+    app: tauri::AppHandle,
+    state: tauri::State<Arc<AppState>>,
+) -> Result<TriggerRuntimeState, AppError> {
+    let language = *state.language.lock();
+    let schema = state.schema.lock().clone().ok_or_else(|| AppError {
+        code: "dp_file_required".into(),
+        title: language
+            .text("请先加载 DP 文件", "Load a DP file first")
+            .into(),
+        message: language
+            .text(
+                "触发规则需要当前 Debugfile 的 DP 定义。",
+                "Trigger rules require a loaded Debugfile.",
+            )
+            .into(),
+        detail: "schema is empty".into(),
+        suggestion: language
+            .text("请先加载 Debugfile JSON。", "Load a Debugfile JSON first.")
+            .into(),
+    })?;
+    let errors = collect_rule_errors(&rules, &schema);
+    let runtime = {
+        let mut engine = state.trigger_engine.lock();
+        engine.set_rules_with_errors(rules, errors);
+        engine.state()
+    };
+    let _ = app.emit("trigger-rule-state", runtime.clone());
+    Ok(runtime)
+}
+
+#[tauri::command]
+fn update_trigger_rules(
+    rules: Vec<TriggerRule>,
+    changed_rule_ids: Vec<String>,
+    app: tauri::AppHandle,
+    state: tauri::State<Arc<AppState>>,
+) -> Result<TriggerRuntimeState, AppError> {
+    let language = *state.language.lock();
+    let schema = state.schema.lock().clone().ok_or_else(|| AppError {
+        code: "dp_file_required".into(),
+        title: language
+            .text("请先加载 DP 文件", "Load a DP file first")
+            .into(),
+        message: language
+            .text(
+                "触发规则热更新需要当前 Debugfile 的 DP 定义。",
+                "Trigger rule hot updates require a loaded Debugfile.",
+            )
+            .into(),
+        detail: "schema is empty".into(),
+        suggestion: language
+            .text("请先加载 Debugfile JSON。", "Load a Debugfile JSON first.")
+            .into(),
+    })?;
+    let errors = collect_rule_errors(&rules, &schema);
+    let runtime = {
+        let mut engine = state.trigger_engine.lock();
+        engine.update_rules(rules, errors, &changed_rule_ids);
+        engine.state()
+    };
+    let _ = app.emit("trigger-rule-state", runtime.clone());
+    Ok(runtime)
+}
+
+#[tauri::command]
+fn set_trigger_master(
+    enabled: bool,
+    app: tauri::AppHandle,
+    state: tauri::State<Arc<AppState>>,
+) -> TriggerRuntimeState {
+    let runtime = {
+        let mut engine = state.trigger_engine.lock();
+        engine.set_master(enabled);
+        engine.state()
+    };
+    let _ = app.emit("trigger-rule-state", runtime.clone());
+    runtime
+}
+
+#[tauri::command]
+fn get_trigger_runtime_state(state: tauri::State<Arc<AppState>>) -> TriggerRuntimeState {
+    state.trigger_engine.lock().state()
+}
+
+#[tauri::command]
+fn cancel_trigger_sequence(
+    sequence_group: String,
+    app: tauri::AppHandle,
+    state: tauri::State<Arc<AppState>>,
+) -> usize {
+    let count = state.trigger_engine.lock().cancel_group(&sequence_group);
+    emit_trigger_state(&app, state.inner());
+    count
+}
+
+#[tauri::command]
+fn preview_trigger_rule(
+    mut rule: TriggerRule,
+    trigger_value: serde_json::Value,
+    state: tauri::State<Arc<AppState>>,
+) -> Result<trigger_rules::GeneratedTriggerRun, AppError> {
+    let language = *state.language.lock();
+    let schema = state.schema.lock().clone().ok_or_else(|| AppError {
+        code: "dp_file_required".into(),
+        title: language
+            .text("请先加载 DP 文件", "Load a DP file first")
+            .into(),
+        message: language
+            .text(
+                "预览触发规则需要 Debugfile。",
+                "Rule preview requires a Debugfile.",
+            )
+            .into(),
+        detail: "schema is empty".into(),
+        suggestion: language
+            .text("请先加载 Debugfile JSON。", "Load a Debugfile JSON first.")
+            .into(),
+    })?;
+    rule.enabled = true;
+    trigger_rules::validate_rules(std::slice::from_ref(&rule), &schema).map_err(|detail| {
+        AppError {
+            code: "trigger_rule_invalid".into(),
+            title: language
+                .text("触发规则配置无效", "Invalid trigger rule")
+                .into(),
+            message: language
+                .text("无法生成预览。", "The preview could not be generated.")
+                .into(),
+            detail,
+            suggestion: language
+                .text("请检查规则必填项。", "Check the required rule fields.")
+                .into(),
+        }
+    })?;
+    let point = schema.by_code(&rule.trigger_code).ok_or_else(|| AppError {
+        code: "trigger_dp_unknown".into(),
+        title: language.text("触发 DP 不存在", "Unknown trigger DP").into(),
+        message: rule.trigger_code.clone(),
+        detail: "trigger code not found".into(),
+        suggestion: language
+            .text("请重新选择触发 DP。", "Select the trigger DP again.")
+            .into(),
+    })?;
+    let now = trigger_rules::now_ms();
+    let due = DueTriggerRun {
+        rule,
+        trigger: TriggerDownload {
+            id: point.id,
+            code: point.code.clone(),
+            value: trigger_value,
+            received_at_ms: now,
+            frame_index: 0,
+        },
+        sequence: None,
+        instance_id: None,
+    };
+    generate_run(
+        &due,
+        &schema,
+        state.simulator.lock().values_json(),
+        state.network.lock().clone(),
+        language,
+        true,
+    )
+    .map_err(|detail| AppError {
+        code: "trigger_preview_failed".into(),
+        title: language
+            .text("触发规则预览失败", "Trigger rule preview failed")
+            .into(),
+        message: language
+            .text(
+                "规则没有生成有效上报数据。",
+                "The rule did not generate valid report data.",
+            )
+            .into(),
+        detail,
+        suggestion: language
+            .text(
+                "请检查匹配值、输出 DP 和脚本。",
+                "Check the match value, output DPs, and script.",
+            )
+            .into(),
+    })
 }
 
 #[tauri::command]
@@ -562,6 +764,12 @@ pub fn run() {
             set_dp_value,
             report_dp_batch,
             execute_timer_script,
+            set_trigger_rules,
+            update_trigger_rules,
+            set_trigger_master,
+            get_trigger_runtime_state,
+            preview_trigger_rule,
+            cancel_trigger_sequence,
             save_log_file,
             load_text_file,
             get_update_environment,

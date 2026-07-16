@@ -93,6 +93,12 @@ The context exposes the current time, run index, persistent script state, curren
 
 See the [JavaScript Scheduled Dynamic Report Tutorial](./javascript-timer-script-guide.en.md) for the full creation workflow, context reference, DP value examples, state rules, Raw packet assembly, CRC, and troubleshooting.
 
+## DP Download Triggered Reports
+
+Trigger rules execute in the backend serial thread. A `0x06` download is saved first and its original value is immediately echoed in a single-DP `0x07` frame, preserving the traditional "echo what was downloaded" behavior. Matching rules then generate their additional `0x07` reports. The download path emits the original value only once even when multiple rules match. Rules support delayed one-time responses and periodic sequences with replace, ignore, queue, and cancel behavior per sequence group.
+
+The master switch only controls whether downloads trigger rules and does not depend on the cloud connection. Rule toggles and structural edits are applied atomically at runtime. An invalid draft pauses only that rule until it is fixed, and editing a running rule cancels only its previous schedule. JavaScript rules receive `ctx.trigger` and `ctx.sequence`; returning `complete=true` ends the sequence after the current successful report. Disabling the master switch, switching Debugfiles, or closing the serial port still clears all pending work.
+
 ## Troubleshooting and Extension Checklist
 
 1. Compare complete validated frames with the official module assistant; use Raw mode only for physical read chunks.

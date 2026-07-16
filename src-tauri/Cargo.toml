@@ -1,6 +1,6 @@
 [package]
 name = "tuya-mcu-simulator-assistant"
-version = "0.1.5"
+version = "0.1.6"
 description = "Cross-platform assistant for simulating a Tuya-compatible MCU over serial"
 license = "MIT"
 repository = "https://github.com/dbdb8/tuya-mcu-simulator-assistant"
@@ -16,6 +16,7 @@ tauri-build = { version = "2.3.0", features = [] }
 [dependencies]
 anyhow = "1.0"
 chrono = { version = "0.4", features = ["serde"] }
+fastrand = "2.3"
 parking_lot = "0.12"
 rquickjs = "0.9"
 serialport = "4.6"

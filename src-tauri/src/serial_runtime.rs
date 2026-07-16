@@ -1,7 +1,8 @@
 use crate::dp_schema::{DpKind, DpSchema};
-use crate::dp_simulator::{decode_value, encode_report_with_enum, DpReport};
+use crate::dp_simulator::{decode_value, encode_report_with_enum, reports_from_patches, DpReport};
 use crate::emit_state;
 use crate::language::AppLanguage;
+use crate::trigger_rules::{generate_run, now_ms, DueTriggerRun, TriggerDownload};
 use crate::tuya_protocol::{
     build_frame, hex, FrameParser, CMD_DP_DOWNLOAD, CMD_DP_REPORT, CMD_GET_GREEN_TIME,
     CMD_GET_LOCAL_TIME, CMD_GET_MAC, CMD_GET_WIFI_STATUS, CMD_HEARTBEAT, CMD_HEARTBEAT_STOP,
@@ -303,6 +304,9 @@ fn run_loop(
                 *state.language.lock(),
             )?;
         }
+
+        // 触发序列由串口线程统一调度，确保不同规则和普通手动发送最终都串行写入同一个端口。
+        process_due_trigger_runs(&mut port, &app, &schema, &state)?;
     }
 
     let _ = app.emit("serial-opened", false);
@@ -403,6 +407,7 @@ fn handle_dp_download(
 ) -> Vec<DpReport> {
     let mut reports = Vec::new();
     let mut index = 0usize;
+    let mut frame_index = 0usize;
     while index + 4 <= payload.len() {
         let id = payload[index];
         let len = u16::from_be_bytes([payload[index + 2], payload[index + 3]]) as usize;
@@ -415,18 +420,50 @@ fn handle_dp_download(
             .simulator
             .lock()
             .apply_download(id, dp_payload, schema);
+        let trigger = schema.by_id(id).and_then(|point| {
+            next_reports
+                .iter()
+                .find(|report| report.id == id)
+                .map(|report| TriggerDownload {
+                    id,
+                    code: point.code.clone(),
+                    value: report.value.clone(),
+                    received_at_ms: now_ms(),
+                    frame_index,
+                })
+        });
+        let matched = trigger
+            .map(|trigger| {
+                state
+                    .trigger_engine
+                    .lock()
+                    .handle_download(trigger, now_ms())
+            })
+            .unwrap_or_default();
         emit_dp_download_log(
             app,
             schema,
             id,
             dp_payload,
             &next_reports,
+            &matched,
             *state.language.lock(),
         );
-        reports.extend(next_reports);
+        // 兼容传统 MCU 的“下发什么立即回什么”：匹配触发规则后仍先回报一次原值，
+        // 后续联动由调度器继续执行。原值在下载层统一追加，因此匹配多条规则也不会重复回报。
+        reports.extend(download_echo_reports(next_reports, &matched));
+        if !matched.is_empty() {
+            emit_trigger_runtime_state(app, state);
+        }
         index += len;
+        frame_index += 1;
     }
     reports
+}
+
+fn download_echo_reports(next_reports: Vec<DpReport>, _matched: &[String]) -> Vec<DpReport> {
+    // 保留独立函数作为回归测试边界，防止后续重构再次因规则匹配而抑制立即回报。
+    next_reports
 }
 
 fn emit_dp_download_log(
@@ -435,6 +472,7 @@ fn emit_dp_download_log(
     id: u8,
     payload: &[u8],
     reports: &[DpReport],
+    matched: &[String],
     language: AppLanguage,
 ) {
     let code = schema
@@ -450,17 +488,123 @@ fn emit_dp_download_log(
                 .text("未保存或未定义", "not saved or undefined")
                 .into()
         });
-    emit_log(
-        app,
-        "rx",
-        &match language {
+    let title = if matched.is_empty() {
+        match language {
             AppLanguage::ZhCn => format!("DP{id} {code} 下发={saved}，已保存并回报"),
             AppLanguage::EnUs => format!("DP{id} {code} downloaded={saved}, saved and reported"),
-        },
-        Some(CMD_DP_DOWNLOAD),
-        payload,
+        }
+    } else {
+        match language {
+            AppLanguage::ZhCn => format!(
+                "DP{id} {code} 下发={saved}，已保存并立即回报原值；匹配 {}，随后执行触发规则",
+                matched.join("、")
+            ),
+            AppLanguage::EnUs => format!(
+                "DP{id} {code} downloaded={saved}; original value echoed immediately; matched {}, trigger rules will follow",
+                matched.join(", ")
+            ),
+        }
+    };
+    emit_log(app, "rx", &title, Some(CMD_DP_DOWNLOAD), payload, false);
+}
+
+fn process_due_trigger_runs(
+    port: &mut Box<dyn SerialPort>,
+    app: &AppHandle,
+    schema: &DpSchema,
+    state: &Arc<AppState>,
+) -> Result<()> {
+    // 每轮限制处理数量，避免大量零延迟规则长期占用串口读取循环。
+    for _ in 0..16 {
+        let due = state.trigger_engine.lock().take_due(now_ms());
+        let Some(due) = due else { break };
+        if let Err(detail) = execute_due_trigger(port, app, schema, state, &due) {
+            state
+                .trigger_engine
+                .lock()
+                .fail_run(&due, detail.clone(), now_ms());
+            emit_log(
+                app,
+                "error",
+                state
+                    .language
+                    .lock()
+                    .text("触发上报失败", "Trigger report failed"),
+                Some(CMD_DP_REPORT),
+                detail.as_bytes(),
+                false,
+            );
+            emit_trigger_runtime_state(app, state);
+        }
+    }
+    Ok(())
+}
+
+fn execute_due_trigger(
+    port: &mut Box<dyn SerialPort>,
+    app: &AppHandle,
+    schema: &DpSchema,
+    state: &Arc<AppState>,
+    due: &DueTriggerRun,
+) -> Result<(), String> {
+    let language = *state.language.lock();
+    let generated = generate_run(
+        due,
+        schema,
+        state.simulator.lock().values_json(),
+        state.network.lock().clone(),
+        language,
         false,
-    );
+    )?;
+    if !generated.skip {
+        let reports = reports_from_patches(&generated.patches, schema)?;
+        let trigger_text = format!("{}={}", due.trigger.code, due.trigger.value);
+        let summary = generated.summary.clone().unwrap_or_else(|| {
+            generated
+                .patches
+                .iter()
+                .map(|patch| format!("{}={}", patch.code, patch.value))
+                .collect::<Vec<_>>()
+                .join(", ")
+        });
+        let title = match language {
+            AppLanguage::ZhCn => format!(
+                "触发上报：{}，触发 {}，{}",
+                due.rule.name, trigger_text, summary
+            ),
+            AppLanguage::EnUs => format!(
+                "Trigger report: {}, trigger {}, {}",
+                due.rule.name, trigger_text, summary
+            ),
+        };
+        if due.rule.report_mode == "sequential" {
+            for report in reports {
+                let frame = build_frame(CMD_DP_REPORT, &encode_report_with_enum(&report));
+                write_frame(port, app, schema, &title, &frame, language)
+                    .map_err(|error| error.to_string())?;
+            }
+        } else {
+            let frame = build_frame(CMD_DP_REPORT, &combine_reports(reports));
+            write_frame(port, app, schema, &title, &frame, language)
+                .map_err(|error| error.to_string())?;
+        }
+        // 串口写入全部成功后才覆盖后端最终状态，避免失败时 UI 提前推进高度或序号。
+        state
+            .simulator
+            .lock()
+            .apply_user_patches(generated.patches.clone(), schema);
+        emit_state(app, state);
+    }
+    state
+        .trigger_engine
+        .lock()
+        .commit_success(due, &generated, now_ms());
+    emit_trigger_runtime_state(app, state);
+    Ok(())
+}
+
+fn emit_trigger_runtime_state(app: &AppHandle, state: &Arc<AppState>) {
+    let _ = app.emit("trigger-rule-state", state.trigger_engine.lock().state());
 }
 
 fn combine_reports(reports: Vec<DpReport>) -> Vec<u8> {
@@ -1551,6 +1695,22 @@ mod wifi_flow_tests {
         )
         .unwrap();
         assert!(unknown.contains("unknown DP=9"));
+    }
+
+    #[test]
+    fn matched_trigger_keeps_the_immediate_original_echo() {
+        let report = DpReport {
+            id: 110,
+            kind: DpKind::Enum,
+            value: json!("up"),
+            enum_range: vec!["stop".into(), "up".into(), "down".into()],
+        };
+
+        // 规则是否匹配只影响后续调度，不得再次改变传统的立即原值回报行为。
+        let echoed = download_echo_reports(vec![report], &["腰托连续上升".into()]);
+        assert_eq!(echoed.len(), 1);
+        assert_eq!(echoed[0].id, 110);
+        assert_eq!(echoed[0].value, json!("up"));
     }
 
     #[test]

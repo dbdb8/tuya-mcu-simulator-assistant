@@ -12,6 +12,7 @@ A cross-platform desktop tool built with Tauri, React, and Rust. It connects a c
 - Handles `55 AA` frames, heartbeat, product info, work mode, network state, and DP queries.
 - Stores DP downloads and actively reports the resulting state.
 - Supports manual, scheduled, batch, and sequential DP reports.
+- Supports DP-download trigger rules, delayed responses, and cancellable periodic report sequences.
 - Runs JavaScript tasks in a QuickJS sandbox to generate related DPs, timestamps, sequences, Raw payloads, and CRC values.
 - Provides Wi-Fi reset, EZ/AP provisioning, and common extension commands.
 - Shows complete-frame and raw serial logs with protocol explanations.

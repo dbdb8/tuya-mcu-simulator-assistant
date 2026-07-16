@@ -31,6 +31,32 @@ pub struct TimerScriptContext {
     pub task_name: String,
     pub run_index: u64,
     pub now_ms: u64,
+    #[serde(default)]
+    pub trigger: Option<TriggerScriptContext>,
+    #[serde(default)]
+    pub sequence: Option<SequenceScriptContext>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TriggerScriptContext {
+    pub id: u8,
+    pub code: String,
+    pub value: Value,
+    pub received_at_ms: u64,
+    pub frame_index: usize,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SequenceScriptContext {
+    pub id: String,
+    pub group: String,
+    pub run_index: u64,
+    pub started_at_ms: u64,
+    pub elapsed_ms: u64,
+    pub previous_run_at_ms: Option<u64>,
+    pub is_first_run: bool,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -40,6 +66,7 @@ pub struct TimerScriptResponse {
     pub state: Value,
     pub summary: Option<String>,
     pub skip: bool,
+    pub complete: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -51,6 +78,8 @@ struct RawScriptResult {
     summary: Option<String>,
     #[serde(default)]
     skip: bool,
+    #[serde(default)]
+    complete: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -95,6 +124,8 @@ pub fn execute(
             "name": request.context.task_name,
             "runCount": request.context.run_index.saturating_sub(1),
         },
+        "trigger": request.context.trigger,
+        "sequence": request.context.sequence,
         "preview": request.preview,
     });
     let output = run_quickjs(&request.source, &input).map_err(|detail| {
@@ -172,7 +203,25 @@ pub fn execute(
         state: raw.state,
         summary: raw.summary.map(|text| text.chars().take(180).collect()),
         skip: raw.skip,
+        complete: raw.complete,
     })
+}
+
+pub(crate) fn validate_source(source: &str) -> Result<(), String> {
+    if source.len() > MAX_SOURCE_BYTES {
+        return Err(format!(
+            "source_bytes={}, max={MAX_SOURCE_BYTES}",
+            source.len()
+        ));
+    }
+    let runtime = Runtime::new().map_err(|err| err.to_string())?;
+    runtime.set_memory_limit(8 * 1024 * 1024);
+    runtime.set_max_stack_size(256 * 1024);
+    let context = Context::full(&runtime).map_err(|err| err.to_string())?;
+    let program = format!(
+        "\"use strict\";\n{source}\nif (typeof generate !== \"function\") throw new Error(\"generate(ctx) is required\");"
+    );
+    context.with(|ctx| ctx.eval::<(), _>(program).map_err(|err| err.to_string()))
 }
 
 fn run_quickjs(source: &str, input: &Value) -> Result<String, String> {
@@ -222,7 +271,7 @@ JSON.stringify(generate(Object.freeze(ctx)));
     })
 }
 
-fn normalize_value(
+pub(crate) fn normalize_value(
     point: &DpPoint,
     value: Value,
     language: AppLanguage,
@@ -473,6 +522,8 @@ mod tests {
                 task_name: "test".into(),
                 run_index: 1,
                 now_ms: 1_700_000_000_000,
+                trigger: None,
+                sequence: None,
             },
             preview: false,
         }

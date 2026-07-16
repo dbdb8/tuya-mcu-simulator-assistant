@@ -17,6 +17,7 @@ import {
 import { useTranslation } from "react-i18next";
 import type { DpSchema } from "../../types";
 import { ManualValueEditor, RandomValueEditor, TimingEditor } from "../dp/DpEditors";
+import { DpSelect } from "../dp/DpSelect";
 import type { NetworkGate, ReportMode, TimerDpItem, TimerTask, ValueMode } from "./types";
 import {
   summarizeTimerGroup,
@@ -450,17 +451,13 @@ function TimerDpItemEditor({
   const itemError = timerItemError(item, schema);
   return (
     <div className={`timer-item ${itemError ? "invalid" : ""}`}>
-      <select
-        className={!point ? "invalid-control" : ""}
+      <DpSelect
+        points={schema?.points ?? []}
         value={item.dpCode}
-        onChange={(event) => onUpdate(taskId, item.id, { dpCode: event.target.value, manualIndex: 0 })}
-      >
-        {(schema?.points ?? []).map((dp) => (
-          <option key={dp.code} value={dp.code}>
-            {dp.id} {dp.code} {dp.name}
-          </option>
-        ))}
-      </select>
+        invalid={!point}
+        compact
+        onChange={(code) => onUpdate(taskId, item.id, { dpCode: code, manualIndex: 0 })}
+      />
       <select
         value={item.valueMode}
         onChange={(event) =>

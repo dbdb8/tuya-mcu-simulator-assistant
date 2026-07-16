@@ -80,6 +80,12 @@ function generate(ctx) {
 | `ctx.task.runCount` | `number`  | 当前已成功执行的次数                                    |
 | `ctx.preview`       | `boolean` | 当前是否由“测试生成”触发                                |
 
+脚本用于“触发上报”时还会提供：
+
+- `ctx.trigger`：本次下发的 `id/code/value/receivedAtMs/frameIndex`。
+- `ctx.sequence`：周期序列的 ID、分组、执行序号、开始时间、已运行时间和上次执行时间；单次响应时为 `null`。
+- 返回 `complete=true`：本次成功上报后结束周期序列。
+
 查看当前 DP 值：
 
 ```javascript

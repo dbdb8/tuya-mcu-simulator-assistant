@@ -6,6 +6,7 @@ export const STORAGE_KEYS = {
   baudRate: "tuya-mcu-simulator-assistant.baudRate",
   dpFilePath: "tuya-mcu-simulator-assistant.dpFilePath",
   timerTasks: "tuya-mcu-simulator-assistant.timerTasks",
+  triggerRules: "tuya-mcu-simulator-assistant.triggerRules",
   language: "tuya-mcu-simulator-assistant.language",
   closeBehavior: "tuya-mcu-simulator-assistant.closeBehavior",
 } as const;

@@ -78,6 +78,12 @@ When `skip` is not `true`, `reports` must contain at least one DP. A code may ap
 | `ctx.task.runCount` | `number`  | Number of successful executions                               |
 | `ctx.preview`       | `boolean` | Whether Test Generation triggered this execution              |
 
+Scripts used by Triggered Reports also receive:
+
+- `ctx.trigger`: the downloaded `id`, `code`, `value`, `receivedAtMs`, and `frameIndex`.
+- `ctx.sequence`: sequence ID, group, run index, start/elapsed time, and previous run time; `null` for one-time responses.
+- Return `complete=true` to end a periodic sequence after the current successful report.
+
 Read a current DP value:
 
 ```javascript
